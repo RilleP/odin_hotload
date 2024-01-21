@@ -1,17 +1,22 @@
 **Getting started**
 - build generator program:
+
   $odin build generator
 
 - using in your program
+  
   $generator.exe 'path_to_your_package' -loader
 
   // call this at start of your program
+  
   hotloader.start(hotload_procs, hotload_files, "generator.exe")
 
   // call this in your main loop
+  
   reload_result := hotloader.reload_if_changed(nil, nil)
 	
 - making a proc hotloadable
+  
 	// Add @hotload attribute and make it mutable by changing :: to :=
 	foo :: proc() 
 
