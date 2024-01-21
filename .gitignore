@@ -1,0 +1,5 @@
+hotload_procs.odin
+hotload_generated_code/
+*.exe
+*.pdb
+.vs
