@@ -18,7 +18,9 @@
 - making a proc hotloadable
   
 	// Add @hotload attribute and make it mutable by changing :: to :=
-	foo :: proc() 
+
+	foo :: proc()
+
 
 	@hotload foo := proc()
 
