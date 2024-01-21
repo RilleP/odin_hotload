@@ -69,7 +69,12 @@ regenerate_code :: proc() -> bool {
 }
 
 recompile_hot_lib :: proc() -> bool {
-	command := fmt.tprintf("odin build hotload_generated_code/code.odin -file -out:%s -build-mode:shared -ignore-unknown-attributes -show-timings %s", DLL_OUTPUT_PATH, "-debug" when ODIN_DEBUG else "");
+	show_timings := .SHOW_LIB_COMPILE_TIMINGS in flags;
+	command := fmt.tprintf("odin build hotload_generated_code/code.odin -file -out:%s -build-mode:shared -ignore-unknown-attributes %s %s", 
+		DLL_OUTPUT_PATH, 
+		"-show-timings" if show_timings else "", 
+		"-debug"        when ODIN_DEBUG else "");
+
 	exit_code := run_process(command);
 	fmt.printf("Recompile finished with exit_code %d\n", exit_code);
     return exit_code == 0;
@@ -81,6 +86,11 @@ target_package_path: string;
 hotload_files: []Hotload_File;
 mutex: sync.Mutex;
 is_running := false;
+
+Flag :: enum {
+	SHOW_LIB_COMPILE_TIMINGS,
+}
+flags: bit_set[Flag];
 
 Hotload_File :: struct {
 	file_name: string,

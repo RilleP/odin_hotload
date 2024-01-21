@@ -634,7 +634,6 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 		case ^ast.Proc_Group: {
 			for arg in node.args {
 				if ident, ok := arg.derived.(^ast.Ident); ok {
-					fmt.printf("Proc group proc %s\n", ident.name);
 					if proc_signature, ok := &data.visit_data.other_proc_signatures[ident.name]; ok {
 						if proc_signature.is_generic {
 							log.errorf("Proc '%s' in referenced proc group '%s' is generic. Calling generic procs - that are defined in your program - from hotloaded functions is not possible (It may be, but not yet).", ident.name, data.name);
@@ -1311,13 +1310,15 @@ main :: proc() {
 		do_add_procs_in_when_trees = false,
 	}
 	
-	arena: virtual.Arena;
-	arena_error := virtual.arena_init_growing(&arena);
-	if arena_error != .None {
-		log.errorf("Failed to allocate arena memory\n");
-		return;
+	{
+		import_file_arena: virtual.Arena;
+		arena_error := virtual.arena_init_growing(&import_file_arena);
+		if arena_error != .None {
+			log.errorf("Failed to allocate import file arena memory\n");
+			return;
+		}
+		visit_data.import_file_allocator = virtual.arena_allocator(&import_file_arena);
 	}
-	visit_data.import_file_allocator = virtual.arena_allocator(&arena);
 
 	visitore := ast.Visitor{
 		visit_node,
