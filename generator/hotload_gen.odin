@@ -68,6 +68,7 @@ Visit_Data :: struct {
 
 Import :: struct {
 	name: string,
+	name_is_user_specified: bool, // Like import foo "core:fmt"
 	fullpath: string,
 	text: string,
 	is_referenced: bool,
@@ -1277,16 +1278,50 @@ main :: proc() {
 			}
 			case ^ast.Import_Decl: {
 				if node.fullpath not_in visit_data.imports {
-					package_name, success := get_package_name_at_path(visit_data.package_path, strings.trim(node.fullpath, "\""), visit_data.import_file_allocator);
-					if success {
-						log.info("Imported package %s name = %s\n", node.fullpath, package_name);
+					package_name: string;
+					name_is_user_specified := false;
+					if node.name.text != "" {
+						package_name = node.name.text;
+						name_is_user_specified = true;
+						log.infof("Imported package '%s' has a custom name = '%s'", node.fullpath, package_name);
 					}
 					else {
-						log.errorf("Failed to get package name for import %s\n", node.fullpath);
+						when false {
+							success: bool;
+							package_name, success = get_package_name_at_path(visit_data.package_path, strings.trim(node.fullpath, "\""), visit_data.import_file_allocator);
+							if success {
+								log.infof("Imported package %s name = '%s'\n", node.fullpath, package_name);
+							}
+							else {
+								log.errorf("Failed to get package name for import %s\n", node.fullpath);
+							}
+						}
+						else {
+							package_path := strings.trim(node.fullpath, "\"");
+							colon_index := strings.index_byte(package_path, ':');
+							if colon_index != -1 {
+								package_path = package_path[colon_index+1:];
+							}
+							last_slash := strings.last_index_byte(package_path, '/');
+							if last_slash != -1 {
+								package_name = package_path[last_slash+1:];
+							}
+							else {
+								package_name = package_path;
+							}
+							log.infof("Imported package '%s' name = '%s'", node.fullpath, package_name);
+						}
 					}
 					
-					visit_data.imports[node.fullpath] = Import { name = package_name };
-					visit_data.packages[package_name] = Import { name = package_name, fullpath = node.fullpath};
+					visit_data.imports[node.fullpath] = Import { 
+						name = package_name, 
+						name_is_user_specified = name_is_user_specified,
+					};
+					visit_data.packages[package_name] = Import { 
+						name = package_name, 
+						fullpath = node.fullpath, 
+						name_is_user_specified = name_is_user_specified,
+					};
 					/*strings.write_string(visit_data.sb, node.import_tok.text);
 					strings.write_byte(visit_data.sb, ' ');
 					strings.write_string(visit_data.sb, node.fullpath);
@@ -1806,14 +1841,18 @@ main :: proc() {
 	}
 	for name, imp in visit_data.packages {
 		if imp.is_referenced {
+			strings.write_string(visit_data.sb, "import ");
+			if imp.name_is_user_specified {
+				strings.write_string(visit_data.sb, name);
+				strings.write_string(visit_data.sb, " ");
+			}
 			colon_index := strings.index_byte(imp.fullpath, ':');
 			if colon_index == -1 {
-				strings.write_string(visit_data.sb, "import \"");
-				strings.write_string(visit_data.sb, fmt.tprint(relative_target_package_path, "..", strings.trim(imp.fullpath, "\""), sep="/"));
+				strings.write_string(visit_data.sb, "\"");
+				strings.write_string(visit_data.sb, fmt.tprint("..", relative_target_package_path, strings.trim(imp.fullpath, "\""), sep="/"));
 				strings.write_string(visit_data.sb, "\"\n");
 			}
 			else {
-				strings.write_string(visit_data.sb, "import ");
 				strings.write_string(visit_data.sb, imp.fullpath);
 				strings.write_byte(visit_data.sb, '\n');
 			}
