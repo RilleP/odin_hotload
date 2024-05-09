@@ -904,7 +904,272 @@ write_indent :: proc(sb: ^strings.Builder, depth: int) {
 	for ii in 0..<depth do strings.write_byte(sb, '\t');
 }
 
-main :: proc() {
+Magic_Suffixes :: enum {
+	bsd,
+	darwin,
+	freestanding,
+	haiku,
+	js,
+	linux,
+	wasi,
+	windows,
+	freebsd,
+	openbsd,
+	essence,
+
+	darwin_amd64,
+    darwin_arm64,
+    essence_amd64,
+    linux_i386,
+    linux_amd64,
+    linux_arm64,
+    linux_arm32,
+    windows_i386,
+    windows_amd64,
+    freebsd_i386,
+    freebsd_amd64,
+    openbsd_amd64,
+    haiku_amd64,
+    freestanding_wasm32,
+    wasi_wasm32,
+    js_wasm32,
+    freestanding_wasm64p32,
+    js_wasm64p32,
+    wasi_wasm64p32,
+    freestanding_amd64_sysv,
+    freestanding_amd64_win64,
+    freestanding_arm64,
+
+	test
+};
+
+OS_NAMES := [type_of(ODIN_OS)]string {
+	.Unknown = "unknown",
+	.Windows = "windows",
+	.Darwin = "darwin",
+	.Linux = "linux",
+	.Essence = "essence",
+	.FreeBSD = "freebsd",
+	.OpenBSD = "openbsd",
+	.WASI = "wasi",
+	.JS = "js",
+	.Freestanding = "freestanding",
+	.Haiku = "haiku",
+};
+
+ARCH_NAMES := [type_of(ODIN_ARCH)]string {
+	.Unknown = "unknown",
+	.amd64 = "amd64",
+	.i386 = "i386",
+	.arm32 = "arm32",
+	.arm64 = "arm64",
+	.wasm32 = "wasm32",
+	.wasm64p32 = "wasm64p32",
+};
+
+target_os := ODIN_OS;
+target_arch := ODIN_ARCH;
+allowed_magic_suffixes: [Magic_Suffixes]bool;
+
+my_collect_package :: proc(path: string) -> (pkg: ^ast.Package, success: bool) {
+	NO_POS :: tokenizer.Pos{}
+
+	pkg_path, pkg_path_ok := filepath.abs(path)
+	if !pkg_path_ok {
+		return
+	}
+
+	path_pattern := fmt.tprintf("%s/*.odin", pkg_path)
+	matches, err := filepath.glob(path_pattern)
+	defer delete(matches)
+
+	if err != nil {
+		return
+	}
+
+	pkg = ast.new(ast.Package, NO_POS, NO_POS)
+	pkg.fullpath = pkg_path
+
+
+	
+
+	magic_suffix_names := reflect.enum_field_names(typeid_of(Magic_Suffixes));
+	for match in matches {
+		DOT_ODIN :: ".odin";
+		name := match[:len(match)-len(DOT_ODIN)];
+		skip := false;
+		for suffix, index in magic_suffix_names {
+			if strings.has_suffix(name, suffix) {
+				log.infof("File %s is has magic suffix!", match);
+
+				if allowed_magic_suffixes[Magic_Suffixes(index)] {
+					log.info("And its allowed!");
+				}
+				else {
+					log.info("And it NOT allowed!");
+					skip = true;
+				}
+			}
+		}
+		if skip do continue;
+		/*if strings.has_suffix(name, ) {
+			log.infof("Skip javascript file %s", match);
+			continue;
+		}
+		log.infof("Add file '%s'", match);*/
+		src: []byte
+		fullpath, ok := filepath.abs(match)
+		if !ok {
+			return
+		}
+		src, ok = os.read_entire_file(fullpath)
+		if !ok {
+			delete(fullpath)
+			return
+		}
+		file := ast.new(ast.File, NO_POS, NO_POS)
+		file.pkg = pkg
+		file.src = string(src)
+
+
+
+		file.fullpath = fullpath
+		pkg.files[fullpath] = file
+	}
+
+	success = true
+	return
+}
+
+my_parse_package_from_path :: proc(path: string, p: ^parser.Parser = nil) -> (pkg: ^ast.Package, ok: bool) {
+	pkg, ok = my_collect_package(path)
+	if !ok {
+		return
+	}
+	ok = my_parse_package(pkg, p)
+	return
+}
+
+file_should_be_included :: proc(file: ^ast.File) -> bool {
+	tokenizor: tokenizer.Tokenizer;
+	tokenizer.init(&tokenizor, file.src, file.fullpath);
+
+	has_build_comment := false;
+	any_build_tag_included := false;
+
+	for {
+		token := tokenizer.scan(&tokenizor);
+		if token.kind == .Comment {
+
+			comment_text := token.text;
+			text := comment_text;
+			if !strings.has_prefix(text, "//") {
+				log.errorf("Build comment '%s' does not start with '//'", comment_text);
+				return false;
+			}
+
+			text = text[2:];
+
+
+			text = strings.trim_left_space(text);
+
+			if strings.has_prefix(text, "+build") {
+				text = text[len("+build"):];
+				fmt.printf("Build comment text is %v\n", text);
+				has_build_comment = true;
+
+				any_allowed := false;
+				for word in strings.split_iterator(&text, ",") {
+					tag := strings.trim_space(word);
+
+					if tag == OS_NAMES[target_os] || tag == ARCH_NAMES[target_arch] {
+						log.infof("Build tag %s is allowed!", tag);
+						any_build_tag_included = true;
+					}
+					/*for os_name in OS_NAMES {
+						if tag == os_name {
+							log.infof("Build tag '%s' is correct!", tag);
+
+							if allowed_magic_suffixes[Magic_Suffixes(index)] {
+								log.info("And its allowed!");
+								any_build_tag_included = true;
+								//return true;
+							}
+							else {
+								log.info("And it NOT allowed!");
+							}
+						}
+					}*/
+				}					
+			}
+			else {
+				log.infof("Ignore comment tag '%s'", comment_text);
+			}
+		}
+		else if token.kind == .Package {
+			break;			
+		}
+		else {
+			log.errorf("Failed to parse file %s. Expected package or comment, got %v\n", file.fullpath, token.kind);
+			return false;
+		}
+	}
+		
+	return !has_build_comment || any_build_tag_included;
+}
+
+my_parse_package :: proc(pkg: ^ast.Package, p: ^parser.Parser = nil) -> bool {
+	p := p
+	if p == nil {
+		p = &parser.Parser{}
+		p^ = parser.default_parser()
+	}
+
+	ok := true
+
+	files := make_dynamic_array_len_cap([dynamic]^ast.File, 0, len(pkg.files), context.temp_allocator)
+	i := 0
+	for _, file in pkg.files {
+		if file_should_be_included(file) {
+			append(&files, file);
+			i += 1
+		}
+		else {
+			log.infof("Skip file %s", file.fullpath);
+		}
+	}
+	slice.sort(files[:])
+	
+	for file in files {
+		if !parser.parse_file(p, file) {
+			ok = false
+		}
+
+		/*skip := false;
+
+		for comment in file.comments {
+			if comment.node.pos.line >= file.pkg_token.pos.line {
+				break;
+			}
+
+			for comment_token in comment.list {
+				
+			}
+		}*/
+
+		if pkg.name == "" {
+			pkg.name = file.pkg_decl.name
+		} else if pkg.name != file.pkg_decl.name {
+			parser.error(p, file.pkg_decl.pos, "different package name, expected '%s', got '%s'", pkg.name, file.pkg_decl.name)
+		}
+	}
+
+	return ok
+}
+
+
+main :: proc() {	
+
 	stopwatch: time.Stopwatch;
 	time.stopwatch_start(&stopwatch);
     
@@ -916,7 +1181,7 @@ main :: proc() {
 	args := os.args[1:];
 	if len(args) < 1 {
 		when ODIN_DEBUG {
-			package_path = "small_test_program"
+			package_path = "test_program"
 		}
 		else {
 			fmt.printf("Usage: %s <path_to_package> [-lib and/or -loader]\n", os.args[0]);
@@ -947,6 +1212,9 @@ main :: proc() {
 			fmt.printf("Unknown flag %s\n", arg);
 		}
 	}
+
+	setup_allowed_magic_suffixes();
+
 	logger_options := runtime.Logger_Options {.Level};
 	if console_can_be_colored() {
 		logger_options += {.Terminal_Color};
@@ -967,7 +1235,7 @@ main :: proc() {
 
 	//package_path := "test_program";
 	//pack, pack_ok := parser.parse_package_from_path("src");
-	pack, pack_ok := parser.parse_package_from_path(package_path);
+	pack, pack_ok := my_parse_package_from_path(package_path);
 	if !pack_ok {
 		fmt.printf("Failed to parse package\n");
 		os.exit(1);
@@ -1615,7 +1883,7 @@ import "core:fmt"
 		}
 		strings.write_string(&loader_sb, "}\n");
 
-		hotload_procs_path := fmt.tprintf("%s/hotload_procs.odin", package_path);
+		hotload_procs_path := fmt.tprintf("%s/hotload_procs_%s_%s.odin", package_path, OS_NAMES[target_os], ARCH_NAMES[target_arch]);
 		os.write_entire_file(hotload_procs_path, transmute([]u8)strings.to_string(loader_sb));
 		fmt.printf("Output %s\n", hotload_procs_path);
 	}
@@ -1715,4 +1983,89 @@ get_package_name_at_path :: proc(target_relative_path: string, package_path: str
 		}
 	}
 	return;
+}
+
+setup_allowed_magic_suffixes :: proc() {
+	if target_os == .Windows {
+		allowed_magic_suffixes[.windows] = true;
+		if target_arch == .amd64 {
+			allowed_magic_suffixes[.windows_amd64] = true;
+		}
+		else if target_arch == .i386 {
+			allowed_magic_suffixes[.windows_i386] = true;
+		}
+	}
+	else if target_os == .Darwin {
+		allowed_magic_suffixes[.darwin] = true;
+		if target_arch == .amd64 {
+			allowed_magic_suffixes[.darwin_amd64] = true;
+		}
+		else if target_arch == .arm64 {
+			allowed_magic_suffixes[.darwin_arm64] = true;
+		}
+	}
+	else if target_os == .Linux {
+		allowed_magic_suffixes[.linux] = true;
+		if target_arch == .i386 {
+			allowed_magic_suffixes[.linux_i386] = true;
+		}
+	    if target_arch == .amd64 {
+	    	allowed_magic_suffixes[.linux_amd64] = true;
+	    }
+	    if target_arch == .arm64 {
+	    	allowed_magic_suffixes[.linux_arm64] = true;
+	    }
+	    if target_arch == .arm32 {
+	    	allowed_magic_suffixes[.linux_arm32] = true;
+	    }
+	}
+	else if target_os == .Essence {
+		allowed_magic_suffixes[.essence] = true;
+		allowed_magic_suffixes[.essence_amd64] = true;
+	}
+	else if target_os == .FreeBSD {
+		allowed_magic_suffixes[.freebsd] = true;
+		if target_arch == .i386 {
+			allowed_magic_suffixes[.freebsd_i386] = true;
+		}
+    	if target_arch == .amd64 {
+    		allowed_magic_suffixes[.freebsd_amd64] = true;
+    	}
+	}
+	else if target_os == .OpenBSD {
+		allowed_magic_suffixes[.openbsd] = true;
+    	if target_arch == .amd64 {
+    		allowed_magic_suffixes[.openbsd_amd64] = true;
+    	}
+	}
+	else if target_os == .WASI {
+		allowed_magic_suffixes[.wasi] = true;
+		if target_arch == .wasm32 {
+			allowed_magic_suffixes[.wasi_wasm32] = true;
+		}
+		if target_arch == .wasm64p32 {
+			allowed_magic_suffixes[.wasi_wasm64p32] = true;
+		}
+	}
+	else if target_os == .JS {
+		allowed_magic_suffixes[.js] = true;
+		if target_arch == .wasm32 {
+			allowed_magic_suffixes[.js_wasm32] = true;
+		}
+		if target_arch == .wasm64p32 {
+			allowed_magic_suffixes[.js_wasm64p32] = true;
+		}
+	}
+	else if target_os == .Freestanding {
+		allowed_magic_suffixes[.freestanding] = true;
+		if target_arch == .wasm32 {
+			allowed_magic_suffixes[.freestanding_wasm32] = true;
+		}
+		if target_arch == .wasm64p32 {
+			allowed_magic_suffixes[.freestanding_wasm64p32] = true;
+		}				
+		if target_arch == .arm64 {
+			allowed_magic_suffixes[.freestanding_arm64] = true;
+		}
+	}
 }
