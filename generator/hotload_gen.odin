@@ -278,7 +278,21 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 	#partial switch derived in statement.derived_stmt {
 		case ^ast.Value_Decl: {
 			for value in derived.values {
-				add_expression_ident_references(visit_data, value);
+				if enum_type, is_enum := value.derived_expr.(^ast.Enum_Type); is_enum {
+					// Handle enum as separate case to not add references to the names of the enum values.
+					if enum_type.base_type != nil {
+						add_expression_ident_references(visit_data, enum_type.base_type);
+					}
+	
+					for field in enum_type.fields {
+						if field_value, ok := field.derived.(^ast.Field_Value); ok {
+							add_expression_ident_references(visit_data, field_value.value);
+						}
+					}
+				}
+				else {
+					add_expression_ident_references(visit_data, value);
+				}
 			}
 			if derived.type != nil do add_expression_type_reference(visit_data, derived.type);
 			add_declaration_names(&visit_data.scopes, derived.names);
@@ -490,7 +504,6 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 		#partial switch derived in expr.derived_expr {
 			case ^ast.Ident: {
 				add_global_reference_if_not_declared_locally(data.visit_data, derived.name);
-				//add_reference_to_ident(&data.visit_data.referenced_identifiers, derived.name);
 			}
 			case ^ast.Call_Expr: {
 				handle_type_expression(derived.expr, data);
