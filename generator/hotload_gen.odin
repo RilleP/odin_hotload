@@ -575,6 +575,14 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			case ^ast.Helper_Type: {
 				handle_type_expression(derived.type, data);
 			}
+			case ^ast.Comp_Lit: {
+				if derived.type != nil {
+					handle_type_expression(derived.type, data);
+				}
+				for elem in derived.elems {
+					handle_type_expression(elem, data);
+				}
+			}
 			case: {
 				log.errorf("Unhandled type expression %v at %v\n", reflect.union_variant_typeid(expr.derived), expr.pos);
 				//assert(false);
