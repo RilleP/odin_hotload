@@ -137,7 +137,15 @@ add_expression_type_reference :: proc(visit_data: ^Visit_Data, expr: ^ast.Expr) 
 		case ^ast.Typeid_Type: {
 			// TODO: Add specialization?
 		}
+		case ^ast.Array_Type: {
+			// TODO
+			fmt.printf("TODO add_expression_type_reference does not handle array.\n");
+		}
+		case ^ast.Dynamic_Array_Type: {
+			add_expression_type_reference(visit_data, derived.elem);
+		}
 		case: {
+			fmt.printf("Unhandled type %v in add_expression_type_reference.\n", expr.derived_expr);
 			assert(false);
 		}
 	}
@@ -252,7 +260,19 @@ add_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
 					panic("Unhandled Poly_Type type not an ident.");
 				}
 			}
-			case: panic("Unhandled declaration name type.");
+			case ^ast.Unary_Expr: {
+				if ident, ok := derived.expr.derived.(^ast.Ident); ok {
+					name = ident.name;
+				}
+				else {
+					fmt.printf("Add??? unary expr declaration name %v\n", derived.expr);
+					continue;
+				}
+			}
+			case: {
+				fmt.printf("Unhandled declaration name type. %v\n", name_expr.derived);
+				panic("Unhandled declaration name type.");
+			}
 		}
 		assert(len(name) > 0);
 		if scopes.current_when_blocks_count > 0 {
@@ -582,6 +602,9 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 				for elem in derived.elems {
 					handle_type_expression(elem, data);
 				}
+			}
+			case ^ast.Multi_Pointer_Type: {
+				handle_type_expression(derived.elem, data);
 			}
 			case: {
 				log.errorf("Unhandled type expression %v at %v\n", reflect.union_variant_typeid(expr.derived), expr.pos);
@@ -1574,6 +1597,12 @@ main :: proc() {
 								};
 							}
 							case ^ast.Proc_Group: {
+								visit_data.all_type_declarations[name] = Type_Declaration{
+									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+									value = value,
+								};
+							}
+							case ^ast.Dynamic_Array_Type: {
 								visit_data.all_type_declarations[name] = Type_Declaration{
 									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
 									value = value,
