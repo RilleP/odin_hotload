@@ -1,4 +1,4 @@
-hotload_procs.odin
+hotload_procs_*.odin
 hotload_generated_code/
 *.exe
 *.pdb

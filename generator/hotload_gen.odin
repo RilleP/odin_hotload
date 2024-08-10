@@ -10,7 +10,7 @@ import "core:log"
 import "core:time"
 import "core:path/filepath"
 
-import "core:runtime"
+import "base:runtime"
 import "core:reflect"
 import "core:mem"
 import "core:mem/virtual"
@@ -18,6 +18,7 @@ import "core:slice"
 
 Block :: struct {
 	first_declaration_index: int,
+	first_constant_value_declaration_index: int,
 }
 
 Local_Declarations_Type :: enum {
@@ -28,6 +29,7 @@ Local_Declarations :: struct {
 	// Things declared in a proc or struct definition
 	type: Local_Declarations_Type,
 	declaration_stack: [dynamic]string,
+	constant_value_declaration_stack: [dynamic]string,
 	block_stack: [dynamic]Block,
 }
 
@@ -39,6 +41,12 @@ Scopes :: struct {
 	current_when_blocks_count: int,
 }
 
+Proc_To_Write :: struct {
+	name: string,
+	lit: ^ast.Proc_Lit,
+	file_src: string,
+}
+
 Visit_Data :: struct {
 	package_path: string,
 	sb: ^strings.Builder,
@@ -47,8 +55,10 @@ Visit_Data :: struct {
 	current_file_has_hotload_procs: bool,
 
 	hotload_proc_names: [dynamic]string,
+	hotload_procs_to_write: [dynamic]Proc_To_Write,
 	other_proc_signatures:   map[string]Proc_Signature,
 	all_type_declarations: map[string]Type_Declaration,
+	global_variables: map[string]Global_Variable_Declaration,
 	when_trees: [dynamic]When_Tree,
 	hotload_files: [dynamic]string,
 
@@ -99,6 +109,11 @@ Type_Declaration_State :: enum u8 {
 	Referenced,
 }
 
+Global_Variable_Declaration :: struct {
+	decl_string: string,
+	type_string: string,
+}
+
 When_Tree :: struct {
 	any_referenced: bool,
 	all_type_declarations: map[string]Type_Declaration_State,
@@ -111,7 +126,10 @@ When_Tree :: struct {
 add_expression_type_reference :: proc(visit_data: ^Visit_Data, expr: ^ast.Expr) {
 	#partial switch derived in expr.derived_expr {
 		case ^ast.Ident: {
-			add_global_reference(visit_data, derived.name);
+			add_global_reference_if_not_declared_locally(visit_data, derived.name);
+			//add_global_reference(visit_data, derived.name);
+		}
+		case ^ast.Basic_Lit: {
 		}
 		case ^ast.Pointer_Type: {
 			add_expression_type_reference(visit_data, derived.elem);
@@ -138,10 +156,28 @@ add_expression_type_reference :: proc(visit_data: ^Visit_Data, expr: ^ast.Expr) 
 			// TODO: Add specialization?
 		}
 		case ^ast.Array_Type: {
-			// TODO
-			fmt.printf("TODO add_expression_type_reference does not handle array.\n");
+			if derived.len != nil {
+				add_expression_ident_references(visit_data, derived.len);
+			}
+			add_expression_type_reference(visit_data, derived.elem);
 		}
 		case ^ast.Dynamic_Array_Type: {
+			add_expression_type_reference(visit_data, derived.elem);
+		}
+		case ^ast.Ellipsis: {
+			add_expression_type_reference(visit_data, derived.expr);
+		}
+		case ^ast.Implicit: {
+			// Note: this is the context token. Don't need to do anything with that I don't think
+		}
+		case ^ast.Poly_Type: {
+			if derived.specialization != nil {
+				add_expression_type_reference(visit_data, derived.specialization);
+			}
+		}
+		case ^ast.Matrix_Type: {
+			add_expression_type_reference(visit_data, derived.row_count);
+			add_expression_type_reference(visit_data, derived.column_count);
 			add_expression_type_reference(visit_data, derived.elem);
 		}
 		case: {
@@ -212,8 +248,12 @@ visit_and_add_ident_references :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -
 			//return nil;
 		}
 		case ^ast.Field: {
+			add_declaration_names(&visit_data.scopes, derived.names);
 			add_expression_ident_references(visit_data, derived.type);
 			add_expression_ident_references(visit_data, derived.default_value);
+			return nil;
+		}
+		case ^ast.Struct_Type: {
 			return nil;
 		}
 		case ^ast.Field_Value: {
@@ -238,10 +278,34 @@ add_field_list_type_references :: proc(visit_data: ^Visit_Data, scopes: ^Scopes,
 
 	for field in field_list.list {
 		add_declaration_names(scopes, field.names);
-		add_expression_type_reference(visit_data, field.type);
+		if field.type != nil {
+			add_expression_type_reference(visit_data, field.type);
+		}
 		if field.default_value != nil {
 			add_expression_ident_references(visit_data, field.default_value);
 		}
+	}
+}
+
+add_constant_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
+	for name_expr in names {
+		name: string;
+		#partial switch derived in name_expr.derived {
+			case ^ast.Ident: {
+				name = derived.name;
+			}
+			case: {
+				fmt.printf("Unhandled constant declaration name type. %v\n", name_expr.derived);
+				panic("Unhandled constant declaration name type.");
+			}
+		}
+		assert(len(name) > 0);
+		// TODO: Fix For When blocks
+		/*if scopes.current_when_blocks_count > 0 {
+			n := scopes.declarations_in_current_when_blocks[name];
+			scopes.declarations_in_current_when_blocks[name] = n+1;
+		}*/
+		append(&scopes.current.constant_value_declaration_stack, name);
 	}
 }
 
@@ -284,19 +348,32 @@ add_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
 }
 
 enter_block :: proc(scopes: ^Scopes) {
-	append(&scopes.current.block_stack, Block { len(scopes.current.declaration_stack) });
+	append(&scopes.current.block_stack, Block { 
+		len(scopes.current.declaration_stack),
+		len(scopes.current.constant_value_declaration_stack)
+	});
 }
 
 exit_block :: proc(scopes: ^Scopes) {
 	popped := pop(&scopes.current.block_stack);
 	if len(scopes.current.declaration_stack) > popped.first_declaration_index {
-		remove_range(&scopes.current.declaration_stack, popped.first_declaration_index, len(scopes.current.declaration_stack));
+		remove_range(
+			&scopes.current.declaration_stack, 
+			popped.first_declaration_index, 
+			len(scopes.current.declaration_stack));
+		remove_range(
+			&scopes.current.constant_value_declaration_stack,
+			popped.first_constant_value_declaration_index, 
+			len(scopes.current.constant_value_declaration_stack));
 	}
 }
 
 add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) {
 	#partial switch derived in statement.derived_stmt {
 		case ^ast.Value_Decl: {
+			// add name before so that the name can be used inside the value in the case that the value is a struct type. 
+			add_declaration_names(&visit_data.scopes, derived.names);
+
 			for value in derived.values {
 				if enum_type, is_enum := value.derived_expr.(^ast.Enum_Type); is_enum {
 					// Handle enum as separate case to not add references to the names of the enum values.
@@ -315,7 +392,6 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 				}
 			}
 			if derived.type != nil do add_expression_type_reference(visit_data, derived.type);
-			add_declaration_names(&visit_data.scopes, derived.names);
 		}
 		case ^ast.For_Stmt: {
 			enter_block(&visit_data.scopes);
@@ -406,7 +482,8 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 					add_block_references(visit_data, else_block);
 					exit_block(scopes);
 				}
-				else /*if else_when, ok := derived.else_stmt.derived_stmt.(^ast.When_Stmt); ok*/ {
+				else {
+					// This is to assert that it is actually a when stmt
 					a := derived.else_stmt.derived_stmt.(^ast.When_Stmt);
 					add_statement_references(visit_data, derived.else_stmt);
 				}
@@ -435,7 +512,6 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 			exit_block(&visit_data.scopes);
 		}
 		case ^ast.Expr_Stmt: {
-
 			add_expression_ident_references(visit_data, derived.expr);
 		}
 		case: {
@@ -445,8 +521,20 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 	}
 }
 
-add_block_references :: proc(visit_data: ^Visit_Data, block: ^ast.Block_Stmt) {
+add_all_constant_declarations_in_block :: proc(visit_data: ^Visit_Data, block: ^ast.Block_Stmt) {
 	for statement in block.stmts {
+		if value_decl, ok := statement.derived_stmt.(^ast.Value_Decl); ok && !value_decl.is_mutable {
+			add_constant_declaration_names(&visit_data.scopes, value_decl.names);
+		}
+	}
+}
+
+add_block_references :: proc(visit_data: ^Visit_Data, block: ^ast.Block_Stmt) {
+	add_all_constant_declarations_in_block(visit_data, block);
+	for statement in block.stmts {
+		/*if value_decl, ok := statement.derived_stmt.(^ast.Value_Decl); ok && !value_decl.is_mutable {
+			continue;
+		}*/
 		add_statement_references(visit_data, statement);	
 	}	
 }
@@ -492,16 +580,26 @@ Value_Declaration_Add_Reference_Data :: struct {
 	scopes: ^Scopes,*/
 }
 
-add_global_reference_if_not_declared_locally :: proc(visit_data: ^Visit_Data, name: string) {
-	declared_locally := false;
+name_is_declared_locally :: proc(visit_data: ^Visit_Data, name: string) -> bool {
 	if visit_data.scopes.current != nil {
 		#reverse for declared in visit_data.scopes.current.declaration_stack {
 			if declared == name {
-				declared_locally = true;
-				break;				
+				return true;
+			}
+		}
+		#reverse for ld in visit_data.scopes.local_declaration_stack {
+			#reverse for declared in ld.constant_value_declaration_stack {
+				if declared == name {
+					return true;
+				}
 			}
 		}
 	}
+	return false;
+}
+
+add_global_reference_if_not_declared_locally :: proc(visit_data: ^Visit_Data, name: string) {
+	declared_locally := name_is_declared_locally(visit_data, name);
 	if !declared_locally {
 		//fmt.printf("%s is not declared locally\n", name);
 		add_global_reference(visit_data, name);
@@ -605,6 +703,9 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			}
 			case ^ast.Multi_Pointer_Type: {
 				handle_type_expression(derived.elem, data);
+			}
+			case ^ast.Ellipsis: {
+				//handle_
 			}
 			case: {
 				log.errorf("Unhandled type expression %v at %v\n", reflect.union_variant_typeid(expr.derived), expr.pos);
@@ -726,6 +827,29 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 		case ^ast.Union_Type: {}
 		case ^ast.Basic_Lit: {}
 		case ^ast.Call_Expr: {}
+		case ^ast.Bit_Field_Field: {
+			handle_type_expression(node.type, data);
+		}
+		case ^ast.Bit_Field_Type: {
+			handle_type_expression(node.backing_type, data);
+			scopes := &data.visit_data.scopes;
+
+			// If this is a struct declared inside a struct, the parents generic declarations should be inherited. So don't add a new local declaration in that case.
+			push_new_local_declaration := scopes.current == nil || scopes.current.type != .Struct;
+			if push_new_local_declaration {
+				push_local_declaration(scopes, .Struct);
+			}
+			defer if push_new_local_declaration {
+				pop_local_declaration(scopes);
+			}
+
+			for field in node.fields {
+				//ast.walk(visitor, field);
+				handle_type_expression(field.type, data);
+				handle_type_expression(field.bit_size, data);
+			}
+			return nil;
+		}
 		case: {
 			log.errorf("Unhandled Value declaration node %v. %v\n", reflect.union_variant_typeid(any_node.derived), any_node.pos);
 		}
@@ -1000,6 +1124,8 @@ OS_NAMES := [type_of(ODIN_OS)]string {
 	.JS = "js",
 	.Freestanding = "freestanding",
 	.Haiku = "haiku",
+	.NetBSD = "netbsd",
+	.Orca = "orca",
 };
 
 ARCH_NAMES := [type_of(ODIN_ARCH)]string {
@@ -1290,7 +1416,7 @@ main :: proc() {
 		os.exit(1);
 	}
 
-	log.info("Parsed package %s", package_path);
+	log.infof("Parsed package %s", package_path);
 	
 	visit_node :: proc(visitor: ^ast.Visitor, any_node: ^ast.Node) -> ^ast.Visitor {
 		visit_data := cast(^Visit_Data)visitor.data;
@@ -1311,7 +1437,11 @@ main :: proc() {
 					visit_data.current_file_path = "";
 					visit_data.current_file_src = "";
 				}
-				if strings.has_suffix(node.fullpath, "hotload_procs.odin") {
+				/*if strings.has_suffix(node.fullpath, "hotload_procs.odin") {
+					return nil;
+				}*/
+				dir, filename := filepath.split(node.fullpath);
+				if matched, err := filepath.match("hotload_procs_*.odin", filename); matched {
 					return nil;
 				}
 
@@ -1438,25 +1568,52 @@ main :: proc() {
 			}
 			case ^ast.Value_Decl: {
 				//return &declaration_visitor;
-				//fmt.printf("%v\n", node);
-				if len(node.values) != len(node.names) do break;
+				//fmt.printf("!!!VALUE DECL!!! %v\n", visit_data.current_file_src[node.pos.offset:node.end.offset-1]);
+				//if len(node.values) != len(node.names) do break;
 
 				do_hotload := false;
+				is_file_private := false;
 				for attribute in node.attributes {
 					//fmt.printf("\t%v\n", attribute);
 					for expression in attribute.elems {
 						#partial switch e in expression.derived_expr {
 							case ^ast.Ident: {
 								if e.name == "hotload" {
-									//fmt.printf("Hotload this proc!\n");
+									fmt.printf("Hotload this proc!\n");
 									do_hotload = true;
 								}
 								else if e.name == "export" {
 									//fmt.printf("Export this proc!\n");
 								}
+								else if e.name == "private" {
+									// Package private is ok, don't care about this
+								}
+							}
+							case ^ast.Field_Value: {
+								name_ident, name_ok := e.field.derived.(^ast.Ident);
+								value_literal, value_ok := e.value.derived.(^ast.Basic_Lit);
+								if name_ok && value_ok {
+									if name_ident.name == "private" && value_literal.tok.text == "\"file\"" {
+										is_file_private = true;
+									}
+								}
+								else {
+									/*fmt.printf("Either name or value is not what was expected...\n\nName = %v\n\nValue = %v\n\n", e.field.derived, e.value.derived);
+									panic("What");*/
+								}
+							}
+							case: {
+								fmt.printf("Unhandled attribute %v\n", e);
 							}
 						}
 					}
+				}
+				if is_file_private {
+					if do_hotload {
+						visit_data.failed = true;
+						log.errorf("Hotloaded procs can't be file private, or can they?");
+					}
+					return nil;
 				}
 				if do_hotload && !node.is_mutable {
 					visit_data.failed = true;
@@ -1475,169 +1632,275 @@ main :: proc() {
 				}
 				for name_node, index in node.names {
 					name: string;
-					has_body := false;
-					lit: ^ast.Proc_Lit;
 					if ident, ok := name_node.derived.(^ast.Ident); ok {
 						name = ident.name;
 					}					
 					//fmt.printf("Declaration %s\n", name)
 
-					value := node.values[index];
-					if node.is_mutable {
-						#partial switch type in value.derived_expr {
-							case ^ast.Proc_Lit: {
-								//fmt.printf("%s is a proc literal\n", name);
-								lit = type;
-								body := type.body;
-								if body != nil {
-									//fmt.printf("Body = %v\n", body.derived_stmt);
-									has_body = true;
-								}
-							}
-						}
-					}
-					else {
-						#partial switch type in value.derived_expr {
-							case ^ast.Proc_Lit: {
-								//fmt.printf("%s is a proc literal\n", name);
-								lit = type;
-								body := type.body;
-								if body != nil {
-									//fmt.printf("Body = %v\n", body.derived_stmt);
-									has_body = true;
-								}
-							}
-							case ^ast.Struct_Type: {
-								//fmt.printf("%s is a struct type\n", name);
-								visit_data.all_type_declarations[name] = Type_Declaration{
-								 	decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-								 	value = value,
-								 };
-							}
-							case ^ast.Union_Type: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-								 	decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-								 	value = value,
-								 };
-							}
-							case ^ast.Enum_Type: {
-								//fmt.printf("%s is an enum type\n", name);
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Ident: {
-								//fmt.printf("%s is an ident\n", name);
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Distinct_Type: {
-								//fmt.printf("%s is a distinct type\n", name);
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Array_Type: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Helper_Type: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Call_Expr: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Basic_Lit: {
-								//fmt.printf("%s is a basic lit\n", name);
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Binary_Expr: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Comp_Lit: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Selector_Expr: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Unary_Expr: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Type_Cast: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Proc_Group: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
-							}
-							case ^ast.Dynamic_Array_Type: {
-								visit_data.all_type_declarations[name] = Type_Declaration{
-									decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-									value = value,
-								};
+					if len(node.values) == 0 {
+						type_string := visit_data.current_file_src[node.type.pos.offset:node.type.end.offset];
+						//fmt.printf("%s is a global variable with type %s.\n", name, type_string,);
+						visit_data.global_variables[name] = {
+							type_string = type_string,
+						};
+						/*#partial switch type in node.derived_node {
+							case ^ast.Value_Decl: {
+								fmt.printf("%s is a value decl\n", name);
 							}
 							case: {
-								
-								log.errorf("Unhandled value declaration type: %v for %s %v\n", reflect.union_variant_typeid(value.derived_expr), name, value.pos);
+								log.warnf("Unhandled node without value: %v\n", node.derived_node);
+							}
+						}*/
+					}
+					else {
+						value := node.values[index];
+						if proc_lit, is_proc := value.derived_expr.(^ast.Proc_Lit); is_proc {
+
+							//fmt.printf("%s is a proc literal\n", name);
+							body := proc_lit.body;
+							if body != nil {
+								//fmt.printf("Body = %v\n", body.derived_stmt);
+								if do_hotload && len(name) > 0 {
+									//fmt.printf("current src: %s\n", visit_data.current_file_src);
+									//fmt.printf("%v, %v\n", len(visit_data.current_file_src), any_node.end.offset);
+									//fmt.printf("Write: %s\n", visit_data.current_file_src[any_node.pos.offset:min(any_node.end.offset, len(visit_data.current_file_src))]);
+									visit_data.current_file_has_hotload_procs = true;									
+									
+									add_proc_references(visit_data, proc_lit);
+
+									to_write := Proc_To_Write {
+										name,
+										proc_lit,
+										visit_data.current_file_src,
+									}
+									append(&visit_data.hotload_procs_to_write, to_write);
+									append(&visit_data.hotload_proc_names, name);
+								}
+								else if len(name) > 0 && name != "main" {
+									add_other_proc_signature(visit_data, name, proc_lit);
+								}
 							}
 						}
-					}
-					if has_body && do_hotload && len(name) > 0 {
-						//fmt.printf("current src: %s\n", visit_data.current_file_src);
-						//fmt.printf("%v, %v\n", len(visit_data.current_file_src), any_node.end.offset);
-						//fmt.printf("Write: %s\n", visit_data.current_file_src[any_node.pos.offset:min(any_node.end.offset, len(visit_data.current_file_src))]);
-						visit_data.current_file_has_hotload_procs = true;
-						sb := visit_data.sb;
-						strings.write_string(sb, "@export ")
-						proc_lit := value.derived_expr.(^ast.Proc_Lit);
-						strings.write_string(sb, name);
+						else {
+							if node.is_mutable {
+								if node.type != nil {
+									type_string := visit_data.current_file_src[node.type.pos.offset:node.type.end.offset];
+									//fmt.printf("%s is a global variable with type %s.\n", name, type_string,);
+									visit_data.global_variables[name] = {
+										type_string = type_string,
+									};
+								}
+								else {
 
-						strings.write_string(sb, " :: ");
-						//write_proc_literal(sb, proc_lit);
-						
-						//proc_visitor := ast.Visitor { visit_proc_node, visit_data}
-						//ast.walk(&proc_visitor, proc_lit);
+									#partial switch type in value.derived_expr {
+										case ^ast.Proc_Lit: {
+											panic("Handled before!");
+										}
+										case ^ast.Basic_Lit: {
+											fmt.printf("%s is basic lit\n", name);
+											#partial switch type.tok.kind {
+												/*case .Ident: {
+													//fmt.printf("%s is a global ident.\n", name);
+												}*/
+												case .Integer: {
+													//fmt.printf("%s is a global int.\n", name);
+													visit_data.global_variables[name] = {
+														type_string = "int"
+													}
+												}
+												case .Float: {
+													//fmt.printf("%s is a global f64.\n", name);
+													visit_data.global_variables[name] = {
+														type_string = "f64"
+													}
+												}
+												case .Imag: {
+													//log.warnf("Imaginary global variables are not implemented");
+													//fmt.printf("%s is a global imaginary.\n", name);
+												}
+												case .String: {
+													//fmt.printf("%s is a global string.\n", name);
+													visit_data.global_variables[name] = {
+														type_string = "string"
+													}
+												}
+												case .Rune: {
+													//fmt.printf("%s is a global rune.\n", name);
+													visit_data.global_variables[name] = {
+														type_string = "rune"
+													}
+												}
+												case: {
+													log.warnf("Unhandled global variable Basic_Lit %v", type.tok.kind);
+												}
+											}
+										}
+										case ^ast.Comp_Lit: {
+											type_string := "UNKNOWN TYPE";
+											if node.type != nil {
+												type_string = visit_data.current_file_src[node.type.pos.offset:node.type.end.offset];
+											}
+											else  {
+												type_string = visit_data.current_file_src[type.type.pos.offset:type.type.end.offset];
+											}
 
-						add_proc_references(visit_data, proc_lit);
-
-						strings.write_string(visit_data.sb, visit_data.current_file_src[proc_lit.pos.offset:min(proc_lit.end.offset, len(visit_data.current_file_src))]);
-						strings.write_string(sb, "\n");
-						append(&visit_data.hotload_proc_names, name);
-					}
-					else if has_body && len(name) > 0 && name != "main" {
-						add_other_proc_signature(visit_data, name, lit);
+											visit_data.global_variables[name] = {
+												type_string = type_string,
+											}
+										}
+										case ^ast.Selector_Expr: {
+											type_string := visit_data.current_file_src[type.expr.pos.offset:type.expr.end.offset];
+											visit_data.global_variables[name] = {
+												type_string = type_string,
+											}
+										}
+										case ^ast.Implicit_Selector_Expr: {
+											panic("Should have a type, and be handled above!");
+										}
+										case ^ast.Ident: {
+											if type.name == "true" || type.name == "false" {
+												visit_data.global_variables[name] = {
+													type_string = "bool",
+												}
+											}
+											else {
+												log.warnf("Proc global variables are not implemented %v", type);
+											}
+										}
+										case: {
+											log.warnf("Unhandled mutable declaration: %v", value.derived_expr);
+											panic("Unhandled mutable declaration");
+										}
+									}
+								}
+							}
+							else {
+								#partial switch type in value.derived_expr {
+									case ^ast.Proc_Lit: {
+										panic("Handled before!")
+									}
+									case ^ast.Struct_Type: {
+										//fmt.printf("%s is a struct type\n", name);
+										visit_data.all_type_declarations[name] = Type_Declaration{
+										 	decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+										 	value = value,
+										 };
+										//fmt.printf("Add struct '%s'\n", visit_data.current_file_src[type.pos.offset:type.end.offset]);
+									}
+									case ^ast.Union_Type: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+										 	decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+										 	value = value,
+										 };
+									}
+									case ^ast.Enum_Type: {
+										//fmt.printf("%s is an enum type\n", name);
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Ident: {
+										//fmt.printf("%s is an ident\n", name);
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Distinct_Type: {
+										//fmt.printf("%s is a distinct type\n", name);
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Array_Type: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Helper_Type: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Call_Expr: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Basic_Lit: {
+										//fmt.printf("%s is a basic lit\n", name);
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Binary_Expr: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Comp_Lit: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Selector_Expr: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Unary_Expr: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Type_Cast: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Proc_Group: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Dynamic_Array_Type: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+									}
+									case ^ast.Bit_Field_Type: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										};
+										//fmt.printf("Add bit_field '%s'\n", visit_data.current_file_src[type.pos.offset:type.end.offset]);
+									}
+									case ^ast.Bit_Set_Type: {
+										visit_data.all_type_declarations[name] = Type_Declaration{
+											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											value = value,
+										}
+									}
+									case: {
+										
+										log.errorf("Unhandled value declaration type: %v for %s %v\n", reflect.union_variant_typeid(value.derived_expr), name, value.pos);
+									}
+								}
+							}
+						}						
 					}
 				}
 
@@ -1686,7 +1949,23 @@ main :: proc() {
 		append(&visit_data.hotload_files, visit_data.current_file_path);
 	}
 
-	
+	for to_write in visit_data.hotload_procs_to_write {
+		visit_data.current_file_src = to_write.file_src;
+
+		sb := visit_data.sb;
+		strings.write_string(sb, "@export ")
+		strings.write_string(sb, to_write.name);
+
+		strings.write_string(sb, " :: ");
+
+		when true {
+			write_proc_literal(&visit_data, sb, to_write.lit, 0);
+		}
+		else {
+			strings.write_string(sb, visit_data.current_file_src[to_write.lit.pos.offset:min(to_write.lit.end.offset, len(visit_data.current_file_src))]);
+		}
+		strings.write_string(sb, "\n");
+	}
 
 	log.info("Referenced indentifiers:");
 	for ref_name, ref in visit_data.referenced_identifiers {
@@ -1714,18 +1993,24 @@ main :: proc() {
 		// C :: struct {b: B}
 
 		outside_old_len := len(visit_data.referenced_identifiers);
-		for ident, ref in &visit_data.referenced_identifiers {
+		for ident, &ref in visit_data.referenced_identifiers {
 			if ref.found_and_handled {
 				continue;
 			}
 			value_decl_add_references_visitor_data.name = ident;
-			if decl, ok := &visit_data.all_type_declarations[ident]; ok {
+			if type_decl, ok := &visit_data.all_type_declarations[ident]; ok {
+				log.infof("%s is referencing a type declaration.\n", ident);
 				ref.found_and_handled = true;
-				if !decl.value_references_have_been_added {
-					decl.value_references_have_been_added = true;
+				if !type_decl.value_references_have_been_added {
+					type_decl.value_references_have_been_added = true;
 			
-					ast.walk(&value_decl_add_references_visitor, &decl.value.expr_base);
+					ast.walk(&value_decl_add_references_visitor, &type_decl.value.expr_base);
 				}
+				continue;
+			}
+			if global_var_decl, ok := &visit_data.global_variables[ident]; ok {
+				log.infof("%s is referencing a global variable!\n", ident);
+				ref.found_and_handled = true;
 				continue;
 			}
 
@@ -1751,7 +2036,7 @@ main :: proc() {
 				continue;
 			}
 
-			for when_tree in &visit_data.when_trees {
+			for &when_tree in visit_data.when_trees {
 
 				add_when_tree_condition_references :: proc(when_tree: When_Tree, data: ^Value_Declaration_Add_Reference_Data) {
 					visitor := ast.Visitor {
@@ -1829,10 +2114,18 @@ main :: proc() {
 		setup_main_program_proc_pointers :: proc(proc_map: map[string]rawptr) {
 			other_proc = cast(proc(t: Other_Type) -> int)proc_map["other_proc"];
 		}*/
+		strings.write_string(&sb, "// Called Procedures\n");
 		for name, proc_signature in visit_data.other_proc_signatures {
 			if proc_signature.is_generic do continue;
 			if name in visit_data.referenced_identifiers {
 				fmt.sbprintf(&sb, "{0}: #type {1};\n", proc_signature.name, proc_signature.type_string);
+			}
+		}
+		strings.write_byte(&sb, '\n');
+		strings.write_string(&sb, "// Referenced Global variables\n");
+		for name, global_variable in visit_data.global_variables {
+			if name in visit_data.referenced_identifiers {
+				fmt.sbprintf(&sb, "{0}: ^{1};\n", name, global_variable.type_string);
 			}
 		}
 		strings.write_byte(&sb, '\n');
@@ -1843,7 +2136,13 @@ main :: proc() {
 			if proc_signature.is_generic do continue;
 			if name in visit_data.referenced_identifiers {
 				//fmt.sbprintf(&sb, "\t{0} = cast({1})proc_map[\"{0}\"];\n", proc_signature.name, proc_signature.type_string);
-				fmt.sbprintf(&sb, "\t{0} = auto_cast proc_map[\"{0}\"];\n", proc_signature.name, proc_signature.type_string);
+				fmt.sbprintf(&sb, "\t{0} = auto_cast proc_map[\"{0}\"]; // {1}\n", proc_signature.name, proc_signature.type_string);
+			}
+		}
+		strings.write_string(&sb, "\n\t// Global Variables\n");
+		for name, global_variable in visit_data.global_variables {
+			if name in visit_data.referenced_identifiers {
+				fmt.sbprintf(&sb, "\t{0} = auto_cast proc_map[\"{0}\"];\n", name);
 			}
 		}
 
@@ -1851,7 +2150,7 @@ main :: proc() {
 	}
 
 	for ident, ref in visit_data.referenced_identifiers {
-		//fmt.printf("%s is referenced %d times.\n", ident, count);
+		//fmt.printf("%s is referenced %d times.\n", ident, ref.count);
 		if ref.found_and_handled {
 			decl, ok := visit_data.all_type_declarations[ident];
 			if ok {
@@ -1969,6 +2268,10 @@ import "core:fmt"
 		for name, proc_signature in visit_data.other_proc_signatures {
 			if proc_signature.is_generic do continue;
 			fmt.sbprintf(&loader_sb, "\t\"{0}\" = rawptr({0}),\n", proc_signature.name);
+		}
+		strings.write_string(&loader_sb, "\t// Global variable pointers\n");
+		for name, global_variable in visit_data.global_variables {
+			fmt.sbprintf(&loader_sb, "\t\"{0}\" = rawptr(&{0}),\n", name);
 		}
 		strings.write_string(&loader_sb, "}\n");
 

@@ -140,7 +140,7 @@ reload_if_changed :: proc(reloaded_file_proc: Reloaded_File_Proc, reloaded_file_
 		success := reload_hot_lib();
 		if success {
 			if reloaded_file_proc != nil {
-				for hotload_file in &hotload_files {
+				for &hotload_file in hotload_files {
 					if hotload_file.has_changed {
 						reloaded_file_proc(hotload_file.file_name, reloaded_file_proc_userdata);
 						hotload_file.has_changed = false;

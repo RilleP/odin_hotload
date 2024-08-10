@@ -94,7 +94,7 @@ reload_lib_thread_proc :: proc() {
 	    	utf8_length := utf16.decode_to_utf8(utf8_buffer[:], slice.from_ptr(&fni.file_name[0], cast(int)fni.file_name_length/2));
 	    	file_name := transmute(string)utf8_buffer[:utf8_length];
 
-	    	for hotload_file in &hotload_files {
+	    	for &hotload_file in hotload_files {
 		    	if file_name == hotload_file.file_name {
 			    	new_last_write_time, write_time_error := os.last_write_time_by_name(fmt.tprintf("%s\\%s", dir_path, file_name));
 			    	if write_time_error != os.ERROR_NONE {
