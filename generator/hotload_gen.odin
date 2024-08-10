@@ -25,11 +25,21 @@ Local_Declarations_Type :: enum {
 	Struct,
 	Proc,
 }
+
+Local_Declaration_Flag :: enum {
+	IN_SOME_WHEN_BLOCKS,
+}
+
+Local_Declaration :: struct {
+	name: string,
+	flags: bit_set[Local_Declaration_Flag],
+}
+
 Local_Declarations :: struct {
 	// Things declared in a proc or struct definition
 	type: Local_Declarations_Type,
-	declaration_stack: [dynamic]string,
-	constant_value_declaration_stack: [dynamic]string,
+	declaration_stack: [dynamic]Local_Declaration,
+	constant_value_declaration_stack: [dynamic]Local_Declaration,
 	block_stack: [dynamic]Block,
 }
 
@@ -305,7 +315,7 @@ add_constant_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
 			n := scopes.declarations_in_current_when_blocks[name];
 			scopes.declarations_in_current_when_blocks[name] = n+1;
 		}*/
-		append(&scopes.current.constant_value_declaration_stack, name);
+		append(&scopes.current.constant_value_declaration_stack, Local_Declaration{name, {}});
 	}
 }
 
@@ -343,7 +353,7 @@ add_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
 			n := scopes.declarations_in_current_when_blocks[name];
 			scopes.declarations_in_current_when_blocks[name] = n+1;
 		}
-		append(&scopes.current.declaration_stack, name);
+		append(&scopes.current.declaration_stack, Local_Declaration{name, {}});
 	}
 }
 
@@ -497,7 +507,7 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 					}
 					else {
 						// Declared in all blocks
-						append(&scopes.current.declaration_stack, decl);
+						append(&scopes.current.declaration_stack, Local_Declaration{decl, {}});
 					}
 				}
 
@@ -580,16 +590,34 @@ Value_Declaration_Add_Reference_Data :: struct {
 	scopes: ^Scopes,*/
 }
 
+maybe_get_local_declaration :: proc(visit_data: ^Visit_Data, name: string) -> ^Local_Declaration {
+	if visit_data.scopes.current != nil {
+		#reverse for &declared in visit_data.scopes.current.declaration_stack {
+			if declared.name == name {
+				return &declared;
+			}
+		}
+		#reverse for &ld in visit_data.scopes.local_declaration_stack {
+			#reverse for &declared in ld.constant_value_declaration_stack {
+				if declared.name == name {
+					return &declared;
+				}
+			}
+		}
+	}
+	return nil;
+}
+
 name_is_declared_locally :: proc(visit_data: ^Visit_Data, name: string) -> bool {
 	if visit_data.scopes.current != nil {
 		#reverse for declared in visit_data.scopes.current.declaration_stack {
-			if declared == name {
+			if declared.name == name {
 				return true;
 			}
 		}
 		#reverse for ld in visit_data.scopes.local_declaration_stack {
 			#reverse for declared in ld.constant_value_declaration_stack {
-				if declared == name {
+				if declared.name == name {
 					return true;
 				}
 			}
@@ -1579,7 +1607,6 @@ main :: proc() {
 						#partial switch e in expression.derived_expr {
 							case ^ast.Ident: {
 								if e.name == "hotload" {
-									fmt.printf("Hotload this proc!\n");
 									do_hotload = true;
 								}
 								else if e.name == "export" {
@@ -1697,7 +1724,6 @@ main :: proc() {
 											panic("Handled before!");
 										}
 										case ^ast.Basic_Lit: {
-											fmt.printf("%s is basic lit\n", name);
 											#partial switch type.tok.kind {
 												/*case .Ident: {
 													//fmt.printf("%s is a global ident.\n", name);

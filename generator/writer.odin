@@ -3,6 +3,7 @@ package hotload_gen
 import "core:odin/ast"
 import "core:odin/tokenizer"
 import "core:strings"
+import "core:log"
 import "core:fmt"
 
 write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expression: ^ast.Expr, indent: int, is_type: bool = false, is_call: bool = false) {
@@ -14,8 +15,15 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 			/*if (is_type || is_call) && !is_built_in(derived.name) {
 				strings.write_string(sb, "MAIN.");
 			}*/	
-			is_declared_locally := name_is_declared_locally(visit_data, derived.name);
-			is_global := !is_declared_locally && derived.name in visit_data.global_variables;
+			//is_declared_locally := name_is_declared_locally(visit_data, derived.name);
+			local_declaration := maybe_get_local_declaration(visit_data, derived.name);
+			if local_declaration != nil && 
+			   .IN_SOME_WHEN_BLOCKS in local_declaration.flags && 
+			   derived.name in visit_data.global_variables {
+			   	log.errorf("Referenced variable '%s' is declared in some when branches, but not all; it is also a global variable and used after the when blocks. This is not supported.\n\t -> %s(%d:%d)", derived.name, expression.pos.file, expression.pos.line, expression.pos.column);
+			   	visit_data.failed = true;
+			}
+			is_global := local_declaration == nil && derived.name in visit_data.global_variables;
 			if is_global {
 				strings.write_string(sb, "(");
 			}							
@@ -462,6 +470,10 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 			}
 		}
 		case ^ast.When_Stmt: {
+			scopes := &visit_data.scopes;
+			when_blocks_index := scopes.current_when_blocks_count;
+			scopes.current_when_blocks_count += 1;
+
 			strings.write_string(sb, "when ");
 			write_expression(visit_data, sb, derived.cond, indent);
 
@@ -470,7 +482,39 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 			if derived.else_stmt != nil {
 				write_indent(sb, indent);
 				strings.write_string(sb, "else ");
-				write_statement(visit_data, sb, derived.else_stmt, indent);
+
+				if else_block, ok := derived.else_stmt.derived_stmt.(^ast.Block_Stmt); ok {
+					scopes.current_when_blocks_count += 1;
+					enter_block(scopes);
+					write_statement(visit_data, sb, else_block, indent);
+					exit_block(scopes);
+				}
+				else {
+					write_statement(visit_data, sb, derived.else_stmt, indent);
+				}
+			}
+
+			if when_blocks_index == 0 {
+				for decl, count in scopes.declarations_in_current_when_blocks {
+					//fmt.printf("\tWHEN: %s was declared in %d/%d blocks\n", decl, count, scopes.current_when_blocks_count)
+					if count < scopes.current_when_blocks_count { 
+						// Not declared in all blocks, so add as potential global
+						// add_global_reference(visit_data, decl);
+						/*if decl in visit_data.global_variables {
+							log.errorf("%s is declared as a local variable in some branches of a when statement. %s is also a global variable. So this will not work!\n", decl, decl);
+						}
+						fmt.printf("Declaration '%v' in when block is NOT declared in all %v blocks, only in %d of them.\n", decl, scopes.current_when_blocks_count, count);*/
+						append(&scopes.current.declaration_stack, Local_Declaration{decl, {.IN_SOME_WHEN_BLOCKS}});
+					}
+					else {
+						// Declared in all blocks
+						append(&scopes.current.declaration_stack, Local_Declaration{decl, {}});
+						/*fmt.printf("Declaration '%v' in when block is declared in all %d blocks.\n", decl, scopes.current_when_blocks_count);*/
+					}
+				}
+
+				clear(&scopes.declarations_in_current_when_blocks);
+				scopes.current_when_blocks_count = 0;
 			}
 		}
 		case ^ast.For_Stmt: {
@@ -553,6 +597,7 @@ maybe_write_label :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, label: 
 	for ii in 0..<depth do strings.write_byte(sb, '\t');
 }*/
 write_block :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, block: ^ast.Block_Stmt, indent: int) {
+	enter_block(&visit_data.scopes);
 	maybe_write_label(visit_data, sb, block.label, indent);
 
 	add_all_constant_declarations_in_block(visit_data, block);
@@ -572,6 +617,7 @@ write_block :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, block: ^ast.B
 	/*else {
 		strings.write_string(sb, "\n");
 	}*/
+	exit_block(&visit_data.scopes);
 }
 
 write_field_list :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, field_list: ^ast.Field_List, separator: string, indent: int) {
