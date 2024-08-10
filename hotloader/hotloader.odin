@@ -70,10 +70,11 @@ regenerate_code :: proc() -> bool {
 
 recompile_hot_lib :: proc() -> bool {
 	show_timings := .SHOW_LIB_COMPILE_TIMINGS in flags;
-	command := fmt.tprintf("odin build hotload_generated_code/code.odin -file -out:%s -build-mode:shared -ignore-unknown-attributes %s %s", 
+	command := fmt.tprintf("odin build hotload_generated_code/code.odin -file -out:%s -build-mode:shared -ignore-unknown-attributes %s %s %s", 
 		DLL_OUTPUT_PATH, 
 		"-show-timings" if show_timings else "", 
-		"-debug"        when ODIN_DEBUG else "");
+		"-debug"        when ODIN_DEBUG else "",
+		lib_generator_additional_cmd_line_args);
 
 	exit_code := run_process(command);
 	fmt.printf("Recompile finished with exit_code %d\n", exit_code);
@@ -99,7 +100,8 @@ Hotload_File :: struct {
 }
 
 lib_generator_exe_path: string;
-start :: proc(loader_proc: Loader_Proc, file_names: []string, generator_exe_path: string, location := #caller_location) {
+lib_generator_additional_cmd_line_args: string;
+start :: proc(loader_proc: Loader_Proc, file_names: []string, generator_exe_path: string, additional_cmd_line_args: string = "", location := #caller_location) {
 	assert(!is_running);
 	is_running = true;
 	dir, file := filepath.split(location.file_path);
@@ -114,6 +116,7 @@ start :: proc(loader_proc: Loader_Proc, file_names: []string, generator_exe_path
 	//fmt.printf("Working dir: %s\n", working_dir);
 	//fmt.printf("Target package path: %s, dir: %s\n", target_package_path, dir);
 	lib_generator_exe_path = fmt.aprint(target_package_path, generator_exe_path, sep=filepath.SEPARATOR_STRING);
+	lib_generator_additional_cmd_line_args = strings.clone(additional_cmd_line_args);
 	hotload_files = make([]Hotload_File, len(file_names));
 	for file_name, index in file_names {
 		hotload_files[index] = {

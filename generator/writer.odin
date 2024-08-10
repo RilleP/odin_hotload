@@ -547,6 +547,10 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 
 			write_statement(visit_data, sb, derived.body, indent);
 		}
+		case ^ast.Defer_Stmt: {
+			strings.write_string(sb, "defer ");
+			write_statement(visit_data, sb, derived.stmt, indent);
+		}
 		case ^ast.Block_Stmt: {
 			write_block(visit_data, sb, derived, indent);
 		}

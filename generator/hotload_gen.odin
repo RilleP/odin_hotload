@@ -57,6 +57,11 @@ Proc_To_Write :: struct {
 	file_src: string,
 }
 
+Hashtag_Config :: struct {
+	name: string,
+	expr: string,
+}
+
 Visit_Data :: struct {
 	package_path: string,
 	sb: ^strings.Builder,
@@ -71,6 +76,7 @@ Visit_Data :: struct {
 	global_variables: map[string]Global_Variable_Declaration,
 	when_trees: [dynamic]When_Tree,
 	hotload_files: [dynamic]string,
+	hashtag_configs: [dynamic]Hashtag_Config,
 
 	imports: map[string]Import,
 	packages: map[string]Import,
@@ -108,6 +114,7 @@ Proc_Signature :: struct {
 }
 
 Type_Declaration :: struct {
+	file_src: string,
 	decl_string: string,
 	value: ^ast.Expr,
 	value_references_have_been_added: bool,
@@ -854,7 +861,25 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 		}
 		case ^ast.Union_Type: {}
 		case ^ast.Basic_Lit: {}
-		case ^ast.Call_Expr: {}
+		case ^ast.Comp_Lit: {
+			handle_type_expression(node.type, data);
+		}
+		case ^ast.Call_Expr: {
+			if bd, ok := node.expr.derived_expr.(^ast.Basic_Directive); ok && bd.name == "config" {
+
+				visit_data := data.visit_data;
+				assert(len(node.args) == 2);
+				name, name_ok := node.args[0].derived_expr.(^ast.Ident);
+				assert(name_ok);
+
+				hc := Hashtag_Config{
+					name = name.name,
+					expr = visit_data.current_file_src[node.pos.offset:node.end.offset],
+				};
+				append(&visit_data.hashtag_configs, hc);
+				return nil;
+			} 
+		}
 		case ^ast.Bit_Field_Field: {
 			handle_type_expression(node.type, data);
 		}
@@ -877,6 +902,9 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 				handle_type_expression(field.bit_size, data);
 			}
 			return nil;
+		}
+		case ^ast.Basic_Directive: {
+			panic("Handled in case ^ast.Call_Expr");
 		}
 		case: {
 			log.errorf("Unhandled Value declaration node %v. %v\n", reflect.union_variant_typeid(any_node.derived), any_node.pos);
@@ -1816,119 +1844,29 @@ main :: proc() {
 									case ^ast.Proc_Lit: {
 										panic("Handled before!")
 									}
-									case ^ast.Struct_Type: {
-										//fmt.printf("%s is a struct type\n", name);
+									case ^ast.Struct_Type,
+									     ^ast.Union_Type,
+										 ^ast.Enum_Type,
+										 ^ast.Ident,
+										 ^ast.Distinct_Type,
+										 ^ast.Array_Type,
+										 ^ast.Helper_Type,
+										 ^ast.Call_Expr,
+										 ^ast.Basic_Lit,
+										 ^ast.Binary_Expr,
+										 ^ast.Comp_Lit,
+										 ^ast.Selector_Expr,
+										 ^ast.Unary_Expr,
+										 ^ast.Type_Cast,
+										 ^ast.Proc_Group,
+										 ^ast.Dynamic_Array_Type,
+										 ^ast.Bit_Field_Type,
+										 ^ast.Bit_Set_Type: 
+									{
 										visit_data.all_type_declarations[name] = Type_Declaration{
-										 	decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-										 	value = value,
-										 };
-										//fmt.printf("Add struct '%s'\n", visit_data.current_file_src[type.pos.offset:type.end.offset]);
-									}
-									case ^ast.Union_Type: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-										 	decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-										 	value = value,
-										 };
-									}
-									case ^ast.Enum_Type: {
-										//fmt.printf("%s is an enum type\n", name);
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
+											decl_string = visit_data.current_file_src[value.pos.offset:value.end.offset],
 											value = value,
-										};
-									}
-									case ^ast.Ident: {
-										//fmt.printf("%s is an ident\n", name);
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Distinct_Type: {
-										//fmt.printf("%s is a distinct type\n", name);
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Array_Type: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Helper_Type: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Call_Expr: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Basic_Lit: {
-										//fmt.printf("%s is a basic lit\n", name);
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Binary_Expr: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Comp_Lit: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Selector_Expr: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Unary_Expr: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Type_Cast: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Proc_Group: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Dynamic_Array_Type: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-									}
-									case ^ast.Bit_Field_Type: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
-										};
-										//fmt.printf("Add bit_field '%s'\n", visit_data.current_file_src[type.pos.offset:type.end.offset]);
-									}
-									case ^ast.Bit_Set_Type: {
-										visit_data.all_type_declarations[name] = Type_Declaration{
-											decl_string = visit_data.current_file_src[type.pos.offset:type.end.offset],
-											value = value,
+											file_src = visit_data.current_file_src,
 										}
 									}
 									case: {
@@ -2041,6 +1979,7 @@ main :: proc() {
 				if !type_decl.value_references_have_been_added {
 					type_decl.value_references_have_been_added = true;
 			
+					visit_data.current_file_src = type_decl.file_src;
 					ast.walk(&value_decl_add_references_visitor, &type_decl.value.expr_base);
 				}
 				continue;
@@ -2259,8 +2198,40 @@ main :: proc() {
 
 import "core:dynlib"
 import "core:fmt"
-
+import "core:strings"
 `, pack.name);
+
+		strings.write_string(&loader_sb, `
+// This could be file private
+Hotload_Define_Value :: union {
+	bool,
+	int,
+	string,
+}
+Hotload_Command_Line_Define :: struct {
+	name: string,
+	value: Hotload_Define_Value,
+}
+
+hotload_create_defines_command_line_arguments :: proc(allocator := context.allocator) -> string {
+	cmd_sb := strings.builder_make_len_cap(0, 256, allocator);
+	for d in hotload_command_line_defines {
+		fmt.sbprintf(&cmd_sb, "-define:%s=%v ", d.name, d.value);
+	}
+	return strings.to_string(cmd_sb);
+}
+
+hotload_command_line_defines := []Hotload_Command_Line_Define {
+`);
+
+	//{"DEV", #config(DEV, false)},
+		for config, index in visit_data.hashtag_configs {
+			if index > 0 do strings.write_string(&loader_sb, ",\n");
+			fmt.sbprintf(&loader_sb, `	Hotload_Command_Line_Define{{"%s", %s}}`, config.name, config.expr);
+		}
+
+		strings.write_string(&loader_sb, "\n}\n\n");
+
 
 		strings.write_string(&loader_sb, "hotload_files := []string {\n");
 		for file_path, file_path_index in visit_data.hotload_files {
@@ -2283,7 +2254,7 @@ import "core:fmt"
 		strings.write_string(&loader_sb, `
 	if raw, found := dynlib.symbol_address(lib, "setup_main_program_proc_pointers"); found {
 		setup := cast(proc(map[string]rawptr))raw;
-		setup(other_proc_pointers);
+		setup(hotload_other_proc_pointers);
 	}
 			`);
 		
@@ -2301,7 +2272,7 @@ import "core:fmt"
 		strings.write_string(&loader_sb, "\n\treturn true;\n}\n");
 
 
-		strings.write_string(&loader_sb, "other_proc_pointers := map[string]rawptr {\n");
+		strings.write_string(&loader_sb, "hotload_other_proc_pointers := map[string]rawptr {\n");
 		for name, proc_signature in visit_data.other_proc_signatures {
 			if proc_signature.is_generic do continue;
 			fmt.sbprintf(&loader_sb, "\t\"{0}\" = rawptr({0}),\n", proc_signature.name);
