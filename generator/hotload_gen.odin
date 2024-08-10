@@ -1274,7 +1274,7 @@ file_should_be_included :: proc(file: ^ast.File) -> bool {
 
 			if strings.has_prefix(text, "+build") {
 				text = text[len("+build"):];
-				fmt.printf("Build comment text is %v\n", text);
+				//fmt.printf("Build comment text is %v\n", text);
 				has_build_comment = true;
 
 				any_allowed := false;
@@ -1409,6 +1409,7 @@ main :: proc() {
 		}
 		else {
 			fmt.printf("Unknown flag %s\n", arg);
+			os.exit(1);
 		}
 	}
 
@@ -1427,8 +1428,18 @@ main :: proc() {
 	}
 
 	fmt.printf("Generate hotloading for %s.\n", package_path);
-	if error := os.make_directory("hotload_generated_code"); error != os.ERROR_NONE && error != os.ERROR_ALREADY_EXISTS {
-		fmt.printf("Failed to create output directory\n");
+	make_dir: if error := os.make_directory("hotload_generated_code"); error != nil {
+		#partial switch error in error {
+			case os.General_Error: {
+				#partial switch error {
+					case .Exist: {
+						break make_dir;
+					}
+				}
+			}
+		}
+		log.errorf("Failed to create output directory: %v\n", error);
+		os.exit(1);
 	}
 	output_path := "hotload_generated_code/code.odin"
 
