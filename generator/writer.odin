@@ -156,26 +156,46 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 			write_expression(visit_data, sb, derived.value, indent);
 		}
 		case ^ast.Ternary_If_Expr: {
-			write_expression(visit_data, sb, derived.x, 0);
-			strings.write_byte(sb, ' ');
-			strings.write_string(sb, derived.op1.text);
-			strings.write_byte(sb, ' ');
-			write_expression(visit_data, sb, derived.cond, 0);
-			strings.write_byte(sb, ' ');
-			strings.write_string(sb, derived.op2.text);
-			strings.write_byte(sb, ' ');
-			write_expression(visit_data, sb, derived.y, 0);
+			tif := derived;
+			if tif.op1.kind == .Question {
+				assert(tif.op2.kind == .Colon);
+
+				write_expression(visit_data, sb, tif.cond, 0);
+				strings.write_byte(sb, ' ');
+				strings.write_string(sb, tif.op1.text);
+				strings.write_byte(sb, ' ');
+				write_expression(visit_data, sb, tif.x, 0);
+				strings.write_byte(sb, ' ');
+				strings.write_string(sb, tif.op2.text);
+				strings.write_byte(sb, ' ');
+				write_expression(visit_data, sb, tif.y, 0);
+			}
+			else {
+				assert(tif.op1.kind == .If);
+				assert(tif.op2.kind == .Else);
+				
+				write_expression(visit_data, sb, tif.x, 0);
+				strings.write_byte(sb, ' ');
+				strings.write_string(sb, tif.op1.text);
+				strings.write_byte(sb, ' ');
+				write_expression(visit_data, sb, tif.cond, 0);
+				strings.write_byte(sb, ' ');
+				strings.write_string(sb, tif.op2.text);
+				strings.write_byte(sb, ' ');
+				write_expression(visit_data, sb, tif.y, 0);
+			}
 		}
 		case ^ast.Ternary_When_Expr: {
-			write_expression(visit_data, sb, derived.x, 0);
+			twhen := derived;
+			write_expression(visit_data, sb, twhen.x, 0);
 			strings.write_byte(sb, ' ');
-			strings.write_string(sb, derived.op1.text);
+			strings.write_string(sb, twhen.op1.text);
 			strings.write_byte(sb, ' ');
-			write_expression(visit_data, sb, derived.cond, 0);
+			write_expression(visit_data, sb, twhen.cond, 0);
 			strings.write_byte(sb, ' ');
-			strings.write_string(sb, derived.op2.text);
+			strings.write_string(sb, twhen.op2.text);
 			strings.write_byte(sb, ' ');
-			write_expression(visit_data, sb, derived.y, 0);
+			write_expression(visit_data, sb, twhen.y, 0);
 		}
 		case ^ast.Or_Else_Expr: {
 			write_expression(visit_data, sb, derived.x, 0);
