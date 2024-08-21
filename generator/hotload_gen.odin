@@ -215,6 +215,10 @@ add_expression_type_reference :: proc(visit_data: ^Visit_Data, expr: ^ast.Expr) 
 			add_expression_type_reference(visit_data, derived.column_count);
 			add_expression_type_reference(visit_data, derived.elem);
 		}
+		case ^ast.Map_Type: {
+			add_expression_type_reference(visit_data, derived.key);
+			add_expression_type_reference(visit_data, derived.value);
+		}
 		case: {
 			fmt.printf("Unhandled type %v in add_expression_type_reference.\n", expr.derived_expr);
 			assert(false);
@@ -765,6 +769,9 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			}
 			case ^ast.Implicit_Selector_Expr: {
 				// Don't care?
+			}
+			case ^ast.Basic_Directive: {
+				// TODO?
 			}
 			case: {
 				log.errorf("Unhandled type expression %v at %v\n", reflect.union_variant_typeid(expr.derived), expr.pos);
@@ -1379,11 +1386,21 @@ file_should_be_included :: proc(file: ^ast.File) -> bool {
 	return !has_build_comment || any_build_tag_included;
 }
 
+parse_odin_file_error_handler :: proc(pos: tokenizer.Pos, msg: string, args: ..any) {
+	log.error("Failed to parse input file.");
+	sb: strings.Builder;
+	sb.buf.allocator = context.temp_allocator;
+	fmt.sbprintf(&sb, "%s(%d:%d): ", pos.file, pos.line, pos.column)
+	fmt.sbprintf(&sb, msg, ..args)
+	log.errorf(strings.to_string(sb));
+}
+
 my_parse_package :: proc(pkg: ^ast.Package, p: ^parser.Parser = nil) -> bool {
 	p := p
 	if p == nil {
 		p = &parser.Parser{}
 		p^ = parser.default_parser()
+		p.err = parse_odin_file_error_handler;
 	}
 
 	ok := true
@@ -1404,6 +1421,9 @@ my_parse_package :: proc(pkg: ^ast.Package, p: ^parser.Parser = nil) -> bool {
 	for file in files {
 		if !parser.parse_file(p, file) {
 			ok = false
+		}
+		else if p.error_count > 0 {
+			ok = false;
 		}
 
 		/*skip := false;

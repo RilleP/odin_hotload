@@ -110,7 +110,9 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 		}
 		case ^ast.Unary_Expr: {
 			strings.write_string(sb, derived.op.text);
-			write_expression(visit_data, sb, derived.expr, indent);
+			if derived.expr != nil {
+				write_expression(visit_data, sb, derived.expr, indent);
+			}
 		}
 		case ^ast.Implicit_Selector_Expr: {
 			strings.write_byte(sb, '.');
@@ -395,7 +397,10 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 			panic("Not implemented");
 		}
 		case ^ast.Map_Type: {
-			panic("Not implemented");
+			strings.write_string(sb, "map[");
+			write_expression(visit_data, sb, derived.key, 0);
+			strings.write_string(sb, "]");
+			write_expression(visit_data, sb, derived.value, 0);
 		}
 		case ^ast.Relative_Type: {
 			panic("Not implemented");
@@ -544,7 +549,9 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 				write_statement(visit_data, sb, derived.init, 0);
 				strings.write_string(sb, "; ");
 			}
-			write_expression(visit_data, sb, derived.cond, indent);
+			if derived.cond != nil {
+				write_expression(visit_data, sb, derived.cond, indent);
+			}
 
 			if derived.post != nil {
 				strings.write_string(sb, "; ");
