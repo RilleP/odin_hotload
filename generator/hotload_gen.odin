@@ -303,6 +303,12 @@ visit_and_add_ident_references :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -
 			add_proc_references(visit_data, derived);
 			return nil;
 		}
+		case ^ast.Assign_Stmt: {			
+			add_declaration_names(&visit_data.scopes, derived.lhs);
+			for expr in derived.rhs {				
+				add_expression_ident_references(visit_data, expr);
+			}
+		}
 	}
 	return visitor;
 } 
@@ -369,6 +375,16 @@ add_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
 				}
 				else {
 					fmt.printf("Add??? unary expr declaration name %v\n", derived.expr);
+					continue;
+				}
+			}
+			case ^ast.Selector_Expr: {
+				//add_declaration_names(scopes, {derived.expr});
+				if ident, ok := derived.expr.derived.(^ast.Ident); ok {
+					name = ident.name;
+				}
+				else {
+					fmt.printf("Add??? selector expr declaration name %v\n", derived.expr);
 					continue;
 				}
 			}
@@ -478,6 +494,12 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 			}
 
 			exit_block(scopes);
+		}
+		case ^ast.Type_Switch_Stmt: {
+			enter_block(&visit_data.scopes);
+			add_statement_references(visit_data, derived.tag);			
+			add_statement_references(visit_data, derived.body);
+			exit_block(&visit_data.scopes);
 		}
 		case ^ast.If_Stmt: {
 			// Add a surrounding block around the if block with the init statement.
@@ -1852,6 +1874,18 @@ main :: proc() {
 
 											type_string = get_type_string(visit_data.current_file_src, type_expr);
 										}
+										case ^ast.Call_Expr: {
+											type_expr: ^ast.Expr; 
+											if vd.type != nil {
+												type_expr = vd.type;
+											}
+											else  {
+												type_expr = derived_value.expr;
+											}
+
+											type_string = get_type_string(visit_data.current_file_src, type_expr);
+											fmt.printf("Mutable Call expr type string = %s\n", type_string);
+										}
 										case ^ast.Selector_Expr: {
 											type_string = visit_data.current_file_src[derived_value.expr.pos.offset:derived_value.expr.end.offset];
 										}
@@ -1866,9 +1900,9 @@ main :: proc() {
 												type_string = "bool";
 											}
 											else {
-												log.warnf("Proc global variables are not implemented %v", derived_value);
+												log.warnf("Global variables that are referencing other globals are not implemented\n\t%s:%d %v", vd.pos.file, vd.pos.line, visit_data.current_file_src[vd.pos.offset:vd.end.offset]);
 											}
-										}
+										}										
 										case: {
 											log.warnf("Unhandled mutable declaration: %v", value.derived_expr);
 											panic("Unhandled mutable declaration");

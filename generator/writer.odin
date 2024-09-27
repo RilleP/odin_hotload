@@ -597,6 +597,16 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 			write_expression(visit_data, sb, derived.cond, indent);
 			write_statement(visit_data, sb, derived.body, indent);
 		}
+		case ^ast.Type_Switch_Stmt: {
+			maybe_write_label(visit_data, sb, derived.label, indent);
+			if derived.partial {
+				strings.write_string(sb, "#partial");
+			}
+			strings.write_string(sb, "switch ");
+			if derived.tag != nil do write_statement(visit_data, sb, derived.tag, indent);
+			if derived.expr != nil do write_expression(visit_data, sb, derived.expr, indent);
+			write_statement(visit_data, sb, derived.body, indent);
+		}
 		case ^ast.Case_Clause: {
 			strings.write_string(sb, "case ");
 			write_expression_array(visit_data, sb, derived.list, indent);
