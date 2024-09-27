@@ -153,7 +153,7 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 			strings.write_byte(sb, ']');
 		}
 		case ^ast.Field_Value: {
-			write_expression(visit_data, sb, derived.field, indent);
+			strings.write_string(sb, visit_data.current_file_src[derived.field.pos.offset:derived.field.end.offset]);
 			strings.write_string(sb, " = ");
 			write_expression(visit_data, sb, derived.value, indent);
 		}
@@ -678,7 +678,8 @@ write_field_list :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, field_li
 		}
 		for field_name, field_name_index in field.names {
 			if field_name_index > 0 do strings.write_string(sb, ", ");
-			write_expression(visit_data, sb, field_name, indent);
+			//write_expression(visit_data, sb, field_name, indent);
+			strings.write_string(sb, visit_data.current_file_src[field_name.pos.offset:field_name.end.offset]);
 		}
 		if field.type != nil {
 			strings.write_string(sb, ": ");

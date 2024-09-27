@@ -379,14 +379,7 @@ add_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
 				}
 			}
 			case ^ast.Selector_Expr: {
-				//add_declaration_names(scopes, {derived.expr});
-				if ident, ok := derived.expr.derived.(^ast.Ident); ok {
-					name = ident.name;
-				}
-				else {
-					fmt.printf("Add??? selector expr declaration name %v\n", derived.expr);
-					continue;
-				}
+				continue;
 			}
 			case: {
 				fmt.printf("Unhandled declaration name type. %v\n", name_expr.derived);
