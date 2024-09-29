@@ -304,7 +304,6 @@ visit_and_add_ident_references :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -
 			return nil;
 		}
 		case ^ast.Assign_Stmt: {			
-			add_declaration_names(&visit_data.scopes, derived.lhs);
 			for expr in derived.rhs {				
 				add_expression_ident_references(visit_data, expr);
 			}
@@ -362,6 +361,7 @@ add_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
 				name = derived.name;
 			}
 			case ^ast.Poly_Type: {
+				// Example: struct($T: typeid) or proc($T: typeid)
 				if ident, ok := derived.type.derived.(^ast.Ident); ok {
 					name = ident.name;
 				}
@@ -370,6 +370,7 @@ add_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
 				}
 			}
 			case ^ast.Unary_Expr: {
+				// Example: for &t in ts {}
 				if ident, ok := derived.expr.derived.(^ast.Ident); ok {
 					name = ident.name;
 				}
@@ -377,9 +378,6 @@ add_declaration_names :: proc(scopes: ^Scopes, names: []^ast.Expr) {
 					fmt.printf("Add??? unary expr declaration name %v\n", derived.expr);
 					continue;
 				}
-			}
-			case ^ast.Selector_Expr: {
-				continue;
 			}
 			case: {
 				fmt.printf("Unhandled declaration name type. %v\n", name_expr.derived);
@@ -490,7 +488,12 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 		}
 		case ^ast.Type_Switch_Stmt: {
 			enter_block(&visit_data.scopes);
-			add_statement_references(visit_data, derived.tag);			
+			assign := derived.tag.derived.(^ast.Assign_Stmt)
+			add_declaration_names(&visit_data.scopes, assign.lhs);
+			for expr in assign.rhs {
+				add_expression_ident_references(visit_data, expr);
+			}
+			
 			add_statement_references(visit_data, derived.body);
 			exit_block(&visit_data.scopes);
 		}
