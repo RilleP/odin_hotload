@@ -2044,14 +2044,21 @@ main :: proc() {
 		// C :: struct {b: B}
 
 		outside_old_len := len(visit_data.referenced_identifiers);
-		for ident, &ref in visit_data.referenced_identifiers {
+		// Cant loop by pointer to ref, since the referenced_identifiers map might resize when adding new identifiers inside the loop, invalidating the pointer.
+		for ident, ref in visit_data.referenced_identifiers {
+			set_found_and_handled :: proc(visit_data: ^Visit_Data, ident: string) {
+				ref := &visit_data.referenced_identifiers[ident];
+				ref.found_and_handled = true;
+			}
 			if ref.found_and_handled {
 				continue;
 			}
 			value_decl_add_references_visitor_data.name = ident;
 			if type_decl, ok := &visit_data.all_type_declarations[ident]; ok {
 				log.infof("%s is referencing a type declaration.\n", ident);
-				ref.found_and_handled = true;
+				
+				set_found_and_handled(&visit_data, ident);
+
 				if !type_decl.value_references_have_been_added {
 					type_decl.value_references_have_been_added = true;
 			
@@ -2062,7 +2069,7 @@ main :: proc() {
 			}
 			if global_var_decl, ok := &visit_data.global_variables[ident]; ok {
 				log.infof("%s is referencing a global variable!\n", ident);
-				ref.found_and_handled = true;
+				set_found_and_handled(&visit_data, ident);
 
 				if !global_var_decl.value_references_have_been_added {
 					global_var_decl.value_references_have_been_added = true;
@@ -2080,7 +2087,7 @@ main :: proc() {
 			}
 
 			if proc_signature, ok := &visit_data.other_proc_signatures[ident]; ok {
-				ref.found_and_handled = true;
+				set_found_and_handled(&visit_data, ident);
 				if !proc_signature.type_references_have_been_added {
 					if proc_signature.is_generic {
 						log.errorf("Called proc '%s' is generic. Calling generic procs - that are defined in your program - from hotloaded functions is not possible (It may be, but not yet).", ident);
@@ -2096,7 +2103,7 @@ main :: proc() {
 			}
 
 			if imp, ok := &visit_data.packages[ident]; ok {
-				ref.found_and_handled = true;
+				set_found_and_handled(&visit_data, ident);
 				imp.is_referenced = true;
 				continue;
 			}
@@ -2112,7 +2119,7 @@ main :: proc() {
 				}
 				if decl, ok := when_tree.all_type_declarations[ident]; ok {
 					if decl != .Referenced {
-						ref.found_and_handled = true;
+						set_found_and_handled(&visit_data, ident);
 						when_tree.all_type_declarations[ident] = .Referenced;
 
 						log.infof("Found type declaration %s in when tree!\n", ident);
@@ -2139,7 +2146,7 @@ main :: proc() {
 				}
 				if decl, ok := when_tree.all_proc_declarations[ident]; ok {
 					if decl != .Referenced {
-						ref.found_and_handled = true;
+						set_found_and_handled(&visit_data, ident);
 						when_tree.all_proc_declarations[ident] = .Referenced;
 						log.infof("Found proc declaration %s in when tree!\n", ident);
 						
