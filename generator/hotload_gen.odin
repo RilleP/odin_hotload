@@ -486,6 +486,22 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 
 			exit_block(scopes);
 		}
+		case ^ast.Switch_Stmt: {
+			enter_block(&visit_data.scopes);
+			if derived.init != nil do add_statement_references(visit_data, derived.init);
+			add_expression_ident_references(visit_data, derived.cond);
+
+			add_statement_references(visit_data, derived.body);
+
+			exit_block(&visit_data.scopes);
+		}
+		case ^ast.Case_Clause: {
+			enter_block(&visit_data.scopes);
+			for st in derived.body {
+				add_statement_references(visit_data, st);
+			}
+			exit_block(&visit_data.scopes);
+		}
 		case ^ast.Type_Switch_Stmt: {
 			enter_block(&visit_data.scopes);
 			assign := derived.tag.derived.(^ast.Assign_Stmt)
@@ -587,7 +603,10 @@ add_all_constant_declarations_in_block :: proc(visit_data: ^Visit_Data, block: ^
 }
 
 add_block_references :: proc(visit_data: ^Visit_Data, block: ^ast.Block_Stmt) {
+	// Constant declarations must be added before 
+	// since they can be defined out of order.
 	add_all_constant_declarations_in_block(visit_data, block);
+
 	for statement in block.stmts {
 		/*if value_decl, ok := statement.derived_stmt.(^ast.Value_Decl); ok && !value_decl.is_mutable {
 			continue;
@@ -1251,6 +1270,7 @@ ARCH_NAMES := [type_of(ODIN_ARCH)]string {
 	.arm64 = "arm64",
 	.wasm32 = "wasm32",
 	.wasm64p32 = "wasm64p32",
+	.riscv64 = "riscv64",
 };
 
 target_os := ODIN_OS;
@@ -1345,16 +1365,16 @@ file_should_be_included :: proc(file: ^ast.File) -> bool {
 
 	for {
 		token := tokenizer.scan(&tokenizor);
-		if token.kind == .Comment {
+		if token.kind == .File_Tag {
 
-			comment_text := token.text;
-			text := comment_text;
-			if !strings.has_prefix(text, "//") {
-				log.errorf("Build comment '%s' does not start with '//'", comment_text);
+			tag_text := token.text;
+			text := tag_text;
+			if !strings.has_prefix(text, "#") {
+				log.errorf("Tag text '%s' does not start with '#'", tag_text);
 				return false;
 			}
 
-			text = text[2:];
+			text = text[1:];
 
 
 			text = strings.trim_left_space(text);
@@ -1369,7 +1389,7 @@ file_should_be_included :: proc(file: ^ast.File) -> bool {
 					tag := strings.trim_space(word);
 
 					if tag == OS_NAMES[target_os] || tag == ARCH_NAMES[target_arch] {
-						log.infof("Build tag %s is allowed!", tag);
+						//log.infof("Build tag %s is allowed!", tag);
 						any_build_tag_included = true;
 					}
 					/*for os_name in OS_NAMES {
@@ -1389,7 +1409,7 @@ file_should_be_included :: proc(file: ^ast.File) -> bool {
 				}					
 			}
 			else {
-				log.infof("Ignore comment tag '%s'", comment_text);
+				//log.infof("Ignore file tag '%s'", tag_text);
 			}
 		}
 		else if token.kind == .Package {

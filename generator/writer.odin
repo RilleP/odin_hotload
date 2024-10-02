@@ -300,9 +300,14 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 				write_expression(visit_data, sb, derived.align, 0);
 				strings.write_string(sb, " ");
 			}
-			if derived.field_align != nil {
-				strings.write_string(sb, "#field_align");
-				write_expression(visit_data, sb, derived.field_align, 0);
+			if derived.min_field_align != nil {
+				strings.write_string(sb, "#min_field_align");
+				write_expression(visit_data, sb, derived.min_field_align, 0);
+				strings.write_string(sb, " ");
+			}
+			if derived.max_field_align != nil {
+				strings.write_string(sb, "#max_field_align");
+				write_expression(visit_data, sb, derived.max_field_align, 0);
 				strings.write_string(sb, " ");
 			}
 
@@ -594,6 +599,10 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 				strings.write_string(sb, "#partial ");
 			}
 			strings.write_string(sb, "switch ");
+			if derived.init != nil {
+				write_statement(visit_data, sb, derived.init, indent);
+				strings.write_string(sb, "; ");
+			}
 			write_expression(visit_data, sb, derived.cond, indent);
 			write_statement(visit_data, sb, derived.body, indent);
 		}
@@ -611,15 +620,29 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 			strings.write_string(sb, "case ");
 			write_expression_array(visit_data, sb, derived.list, indent);
 			strings.write_byte(sb, ':');
-			for statement in derived.body {
-				if block, is_block := statement.derived.(^ast.Block_Stmt); is_block {
-					write_statement(visit_data, sb, statement, indent);
+
+
+			maybe_get_single_block :: proc(statements: []^ast.Stmt) -> ^ast.Block_Stmt {
+
+				if len(statements) == 1 {
+					block, is_block := statements[0].derived.(^ast.Block_Stmt);
+					if is_block do return block;
 				}
-				else {
-					strings.write_byte(sb, '\n');
-					write_statement(visit_data, sb, statement, indent+1);
-				}
+				return nil;
 			}
+			// case bodies can be either a single block or a list of statements
+			// if its a single block, just write it as a block, otherwise 
+			// create a block from the statements.
+			if block := maybe_get_single_block(derived.body); block != nil {
+				write_block(visit_data, sb, block, indent);
+			}
+			else {
+				block := ast.Block_Stmt {
+					stmts = derived.body,
+					uses_do = false,
+				}
+				write_block(visit_data, sb, &block, indent);
+			}		
 		}
 		case: {
 			fmt.printf("\n%v\n", derived);
@@ -636,6 +659,10 @@ maybe_write_label :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, label: 
 
 /*write_indent :: proc(sb: ^strings.Builder, depth: int) {
 	for ii in 0..<depth do strings.write_byte(sb, '\t');
+}*/
+
+/*write_block_statments :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statements: []^ast.Stmt) {
+	
 }*/
 write_block :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, block: ^ast.Block_Stmt, indent: int) {
 	enter_block(&visit_data.scopes);

@@ -1,4 +1,4 @@
-//+private
+#+private
 package hotloader
 
 import "core:sys/windows"
