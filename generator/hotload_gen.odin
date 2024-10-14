@@ -2228,7 +2228,7 @@ main :: proc() {
 			if proc_signature.is_generic do continue;
 			if name in visit_data.referenced_identifiers {
 				//fmt.sbprintf(&sb, "\t{0} = cast({1})proc_map[\"{0}\"];\n", proc_signature.name, proc_signature.type_string);
-				fmt.sbprintf(&sb, "\t{0} = auto_cast proc_map[\"{0}\"]; // {1}\n", proc_signature.name, proc_signature.type_string);
+				fmt.sbprintf(&sb, "\t{0} = auto_cast proc_map[\"{0}\"]; /* {1} */\n", proc_signature.name, proc_signature.type_string);
 			}
 		}
 		strings.write_string(&sb, "\n\t// Global Variables\n");
