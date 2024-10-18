@@ -97,6 +97,9 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 			write_proc_literal(visit_data, sb, derived, indent);
 		}
 		case ^ast.Comp_Lit: {
+			if derived.tag != nil {
+				write_expression(visit_data, sb, derived.tag, indent, is_type=true);
+			}
 			if derived.type != nil {
 				write_expression(visit_data, sb, derived.type, indent, is_type=true);
 			}
