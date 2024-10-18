@@ -31,3 +31,5 @@
 - Calling functions of imported libraries that read/write any global state of that library does not work, since the hotloaded dll has its own version of that global state. So wrappers has to be made for those functions.
 
 - Changing signatures of hotloaded functions that are called from not-hotloaded functions does not work.
+
+- When calling a procedure in the main program with #optional_ok or #optional_allocator_error, the optional return value is no longer optional. 

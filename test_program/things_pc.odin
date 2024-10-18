@@ -1,4 +1,4 @@
-//+build windows, linux
+#+build windows, linux
 package small
 
 @(private="file") private_global: int;
