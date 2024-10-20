@@ -111,6 +111,9 @@ Proc_Signature :: struct {
 	type: ^ast.Proc_Type,
 	type_references_have_been_added: bool,
 	is_generic: bool,
+	wrapped: bool,
+	attributes: []^ast.Attribute,
+	file_src: string,
 }
 
 Type_Declaration :: struct {
@@ -226,7 +229,43 @@ add_expression_type_reference :: proc(visit_data: ^Visit_Data, expr: ^ast.Expr) 
 	}
 }
 
-add_other_proc_signature :: proc(visit_data: ^Visit_Data, name: string, proc_lit: ^ast.Proc_Lit) {
+add_references_in_proc_attributes :: proc(visit_data: ^Visit_Data, proc_signature: ^Proc_Signature) {
+	for attribute in proc_signature.attributes {
+		for expression in attribute.elems {
+			#partial switch e in expression.derived_expr {
+				case ^ast.Ident: {
+					// Dont care about these					
+				}
+				case ^ast.Field_Value: {
+					name_ident, name_ok := e.field.derived.(^ast.Ident);
+					if !name_ok do panic("Name of field value should be an ident!")
+
+					switch name_ident.name {
+						case "deferred_in", "deferred_out", "deferred_in_out", "deferred_none": {
+							#partial switch value in e.value.derived {		
+								case ^ast.Ident: {
+									deferred_proc_signature, exists := &visit_data.other_proc_signatures[value.name];
+									if exists {
+										deferred_proc_signature.wrapped = true;
+										add_global_reference(visit_data, value.name);
+									}
+								}
+								case: {
+									fmt.printf("deferred_in value is Unimplemented Type: %v\n", value);
+								}
+							}		
+						}
+					}
+				}
+				case: {
+					fmt.printf("Unhandled attribute %v\n", e);
+				}
+			}
+		}
+	}
+}
+
+add_other_proc_signature :: proc(visit_data: ^Visit_Data, name: string, proc_lit: ^ast.Proc_Lit, attributes: [dynamic]^ast.Attribute) {
 	type := proc_lit.type;
 	type_string := visit_data.current_file_src[type.pos.offset:type.end.offset];
 	//fmt.println(type_string);
@@ -251,6 +290,8 @@ add_other_proc_signature :: proc(visit_data: ^Visit_Data, name: string, proc_lit
 		type_string = type_string,
 		type = type,	
 		is_generic = is_generic,
+		attributes = attributes[:],
+		file_src = visit_data.current_file_src,
 	};
 }
 
@@ -1070,7 +1111,7 @@ visit_when_tree_and_add_all_value_declarations :: proc(visitor: ^ast.Visitor, an
 					if visit_data.do_add_procs_in_when_trees {
 						tree.all_proc_declarations[name] = Type_Declaration_State.Defined;
 
-						add_other_proc_signature(visit_data, name, proc_lit);
+						add_other_proc_signature(visit_data, name, proc_lit, decl.attributes);
 					}
 				}
 				else {
@@ -1830,7 +1871,7 @@ main :: proc() {
 									append(&visit_data.hotload_proc_names, name);
 								}
 								else if len(name) > 0 && name != "main" {
-									add_other_proc_signature(visit_data, name, proc_lit);
+									add_other_proc_signature(visit_data, name, proc_lit, vd.attributes);
 								}
 							}
 						}
@@ -2107,6 +2148,7 @@ main :: proc() {
 			}
 
 			if proc_signature, ok := &visit_data.other_proc_signatures[ident]; ok {
+				log.infof("%s is referencing a proc!\n", ident);
 				set_found_and_handled(&visit_data, ident);
 				if !proc_signature.type_references_have_been_added {
 					if proc_signature.is_generic {
@@ -2115,6 +2157,8 @@ main :: proc() {
 					}
 					else {
 						proc_signature.type_references_have_been_added = true;
+
+						add_references_in_proc_attributes(&visit_data, proc_signature);
 
 						ast.walk(&value_decl_add_references_visitor, &proc_signature.type.node);
 					}
@@ -2200,17 +2244,75 @@ main :: proc() {
 	}
 
 	{
-		/*other_proc: #type proc(t: Other_Type) -> int;
 
-		// This will be generated
-		setup_main_program_proc_pointers :: proc(proc_map: map[string]rawptr) {
-			other_proc = cast(proc(t: Other_Type) -> int)proc_map["other_proc"];
-		}*/
+		/* // This will be generated
+			other_proc: #type proc(t: Other_Type) -> int;
+			foo: #type proc(x: int);
+		*/
 		strings.write_string(&sb, "// Called Procedures\n");
-		for name, proc_signature in visit_data.other_proc_signatures {
+		for name, &proc_signature in visit_data.other_proc_signatures {
 			if proc_signature.is_generic do continue;
 			if name in visit_data.referenced_identifiers {
+				do_wrapper := proc_signature.wrapped || len(proc_signature.attributes) > 0;
+
+				if do_wrapper {
+					strings.write_string(&sb, "_MAIN_");
+				}
 				fmt.sbprintf(&sb, "{0}: #type {1};\n", proc_signature.name, proc_signature.type_string);
+
+				if do_wrapper {
+
+					strings.write_string(&sb, "\n");
+
+					for attribute, index in proc_signature.attributes {
+						/*fmt.printf("Attribute %d of %s = %v\n\n", index, name, attribute);
+						for elem, eindex in attribute.elems {
+							#partial switch e in elem.derived_expr {
+								case ^ast.Field_Value: {
+									fv := e;
+									fmt.printf("\tField %d = %v | %v.\n\n", eindex, fv.field.derived_expr, fv.value.derived_expr);
+								}
+								case: fmt.printf("\tElem %d = %v.\n\n", eindex, elem.derived);
+							}
+							
+						}*/
+
+						if attribute.end.offset > attribute.pos.offset {
+							strings.write_string(&sb, proc_signature.file_src[attribute.pos.offset:attribute.end.offset]);	
+						}
+					}
+
+					fmt.sbprintf(&sb, "{0} :: {1} {{\n\t", proc_signature.name, proc_signature.type_string);
+
+					if proc_signature.type.results != nil {
+						strings.write_string(&sb, "return ");
+					}
+
+					fmt.sbprintf(&sb, "_MAIN_{0}(", proc_signature.name);
+					proc_signature.wrapped = true;
+
+					written_param_count := 0;
+					for param in proc_signature.type.params.list {
+						for name in param.names {
+							// TODO: Handle polymorphic name
+							if written_param_count > 0 {
+								strings.write_string(&sb, ", ");
+							}
+							#partial switch derived in name.derived_expr {
+								case ^ast.Ident: {
+									strings.write_string(&sb, derived.name);
+								}
+								case: {
+									fmt.panicf("Unhandled param type %v\n", name.derived_expr);
+								}
+							}
+							written_param_count += 1;
+						}
+
+					}
+					strings.write_string(&sb, ");\n");
+					strings.write_string(&sb, "}\n\n");
+				}
 			}
 		}
 		strings.write_byte(&sb, '\n');
@@ -2222,13 +2324,24 @@ main :: proc() {
 		}
 		strings.write_byte(&sb, '\n');
 
+		
+		/* // This will be generated
+			setup_main_program_proc_pointers :: proc(proc_map: map[string]rawptr) {
+				other_proc = cast(proc(t: Other_Type) -> int)proc_map["other_proc"];
+			}
+		*/
 		strings.write_string(&sb, "@export setup_main_program_proc_pointers :: proc(proc_map: map[string]rawptr) {\n");
 
 		for name, proc_signature in visit_data.other_proc_signatures {
 			if proc_signature.is_generic do continue;
 			if name in visit_data.referenced_identifiers {
 				//fmt.sbprintf(&sb, "\t{0} = cast({1})proc_map[\"{0}\"];\n", proc_signature.name, proc_signature.type_string);
-				fmt.sbprintf(&sb, "\t{0} = auto_cast proc_map[\"{0}\"]; /* {1} */\n", proc_signature.name, proc_signature.type_string);
+				strings.write_string(&sb, "\t");
+				if proc_signature.wrapped {
+					strings.write_string(&sb, "_MAIN_");
+				}
+				fmt.sbprintf(&sb, "%s = auto_cast proc_map[\"", proc_signature.name);
+				fmt.sbprintf(&sb, "%s\"]; /* %s */\n", proc_signature.name, proc_signature.type_string);
 			}
 		}
 		strings.write_string(&sb, "\n\t// Global Variables\n");
