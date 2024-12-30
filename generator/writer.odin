@@ -553,16 +553,17 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 		case ^ast.For_Stmt: {
 			maybe_write_label(visit_data, sb, derived.label, indent);
 			strings.write_string(sb, "for ");
+			is_while := derived.init == nil && derived.post == nil;
 			if derived.init != nil {
 				write_statement(visit_data, sb, derived.init, 0);
-				strings.write_string(sb, "; ");
 			}
+			if !is_while do strings.write_string(sb, "; ");
 			if derived.cond != nil {
 				write_expression(visit_data, sb, derived.cond, indent);
 			}
 
+			if !is_while do strings.write_string(sb, "; ");
 			if derived.post != nil {
-				strings.write_string(sb, "; ");
 				write_statement(visit_data, sb, derived.post, 0);
 			}
 
