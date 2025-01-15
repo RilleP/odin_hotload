@@ -613,7 +613,7 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 		case ^ast.Type_Switch_Stmt: {
 			maybe_write_label(visit_data, sb, derived.label, indent);
 			if derived.partial {
-				strings.write_string(sb, "#partial");
+				strings.write_string(sb, "#partial ");
 			}
 			strings.write_string(sb, "switch ");
 			if derived.tag != nil do write_statement(visit_data, sb, derived.tag, indent);
