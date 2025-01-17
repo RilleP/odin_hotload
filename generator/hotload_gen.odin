@@ -975,6 +975,7 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			for elem in node.elems {
 				handle_type_expression(elem, data);
 			}
+			return nil;
 		}
 		case ^ast.Call_Expr: {
 			if bd, ok := node.expr.derived_expr.(^ast.Basic_Directive); ok && bd.name == "config" {
@@ -2138,7 +2139,27 @@ main :: proc() {
 
 					visit_data.current_file_src = global_var_decl.file_src;
 					if global_var_decl.value_expr != nil {
-						ast.walk(&value_decl_add_references_visitor, global_var_decl.value_expr);
+						#partial switch expr in global_var_decl.value_expr.derived_expr {
+							case ^ast.Comp_Lit: {
+								if expr.type != nil {
+									ast.walk(&value_decl_add_references_visitor, expr.type);
+								}
+							}
+							case ^ast.Call_Expr: {
+								 ast.walk(&value_decl_add_references_visitor, expr.expr);
+							}
+							case ^ast.Selector_Expr: {
+								if expr.expr != nil {
+									ast.walk(&value_decl_add_references_visitor, expr.expr);
+								}
+							}
+							case ^ast.Ident, ^ast.Unary_Expr, ^ast.Basic_Lit: break;
+							case: 
+								//ast.walk(&value_decl_add_references_visitor, global_var_decl.value_expr);
+								fmt.panicf("Unhandled value expr for global variable: %v", global_var_decl.value_expr.derived_expr);
+						}
+
+						
 					}
 					if global_var_decl.type_expr != nil {
 						ast.walk(&value_decl_add_references_visitor, global_var_decl.type_expr);
