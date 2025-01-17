@@ -24,6 +24,7 @@ Block :: struct {
 Local_Declarations_Type :: enum {
 	Struct,
 	Proc,
+	Enum,
 }
 
 Local_Declaration_Flag :: enum {
@@ -910,11 +911,18 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			if node.base_type != nil {
 				handle_type_expression(node.base_type, data);
 			}
+			scopes := &data.visit_data.scopes;
+			push_local_declaration(scopes, .Enum);
 			for field in node.fields {
+
 				if field_value, ok := field.derived.(^ast.Field_Value); ok {
+					name := field_value.field.derived.(^ast.Ident).name;
+					append(&scopes.current.declaration_stack, Local_Declaration{name, {}});
+
 					ast.walk(visitor, field_value.value);
 				}
 			}
+			pop_local_declaration(scopes);
 			return nil;
 		}
 		case ^ast.Type_Cast: {
