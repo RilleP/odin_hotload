@@ -2451,7 +2451,8 @@ main :: proc() {
 
 	if do_generate_loader {
 		loader_sb: strings.Builder;
-		fmt.sbprintf(&loader_sb, `package {0}
+		fmt.sbprintf(&loader_sb, `#+feature dynamic-literals
+package {0}
 // This is a generated file. Changes may be lost.
 
 import "core:dynlib"
