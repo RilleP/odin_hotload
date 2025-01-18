@@ -1196,6 +1196,7 @@ write_when_statement :: proc(data: ^When_Tree_Write_Data, statement: ^ast.Stmt) 
 			if any_name_was_referenced {
 				write_indent(data.sb, data.indent_depth);
 				strings.write_string(data.sb, tree.file_src[derived.pos.offset:derived.end.offset]);
+				strings.write_string(data.sb, "\n");
 			}
 		}
 		case: {
