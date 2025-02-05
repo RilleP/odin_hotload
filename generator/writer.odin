@@ -583,6 +583,27 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 
 			write_statement(visit_data, sb, derived.body, indent);
 		}
+		case ^ast.Unroll_Range_Stmt: {
+			maybe_write_label(visit_data, sb, derived.label, indent);
+			strings.write_string(sb, "#unroll");
+			if len(derived.args) > 0 {
+				strings.write_string(sb, "(");
+				write_expression_array(visit_data, sb, derived.args, 0);				
+				strings.write_string(sb, ")");
+			}
+
+			strings.write_string(sb, " for ");
+			write_expression(visit_data, sb, derived.val0, 0);
+			if derived.val1 != nil {
+				strings.write_string(sb, ", ");
+				write_expression(visit_data, sb, derived.val1, 0);
+			}
+
+			strings.write_string(sb, " in ");
+			write_expression(visit_data, sb, derived.expr, indent);
+
+			write_statement(visit_data, sb, derived.body, indent);
+		}
 		case ^ast.Defer_Stmt: {
 			strings.write_string(sb, "defer ");
 			write_statement(visit_data, sb, derived.stmt, indent);
