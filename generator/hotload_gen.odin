@@ -173,6 +173,9 @@ add_expression_type_reference :: proc(visit_data: ^Visit_Data, expr: ^ast.Expr) 
 		case ^ast.Pointer_Type: {
 			add_expression_type_reference(visit_data, derived.elem);
 		}
+		case ^ast.Multi_Pointer_Type: {
+			add_expression_type_reference(visit_data, derived.elem);
+		}
 		case ^ast.Selector_Expr: {
 			// Is this always an imported type?
 			add_expression_type_reference(visit_data, derived.expr);

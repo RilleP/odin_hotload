@@ -270,7 +270,8 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 			write_expression(visit_data, sb, derived.elem, indent, is_type=true);
 		}
 		case ^ast.Multi_Pointer_Type: {
-			assert(false);
+			strings.write_string(sb, "[^]");
+			write_expression(visit_data, sb, derived.elem, indent, is_type=true);
 		}
 		case ^ast.Array_Type: {
 			if derived.tag != nil {
