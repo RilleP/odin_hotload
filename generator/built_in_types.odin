@@ -196,6 +196,7 @@ is_built_in :: proc(name: string) -> bool {
 		case "make_map": return true;
 		case "make_multi_pointer": return true;
 		case "make": return true;
+		case "raw_data": return true;
 		case "clear_map": return true;
 		case "reserve_map": return true;
 		case "shrink_map": return true;

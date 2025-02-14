@@ -794,6 +794,11 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			case ^ast.Dynamic_Array_Type: {
 				handle_type_expression(derived.elem, data);
 			}
+			case ^ast.Matrix_Type: {
+				handle_type_expression(derived.row_count, data);
+				handle_type_expression(derived.column_count, data);
+				handle_type_expression(derived.elem, data);
+			}
 			case ^ast.Bit_Set_Type: {
 				handle_type_expression(derived.elem, data);
 			}
