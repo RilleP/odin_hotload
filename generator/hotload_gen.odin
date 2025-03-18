@@ -1076,14 +1076,19 @@ visit_when_tree_and_add_references_for_specific_value_declaration :: proc(visito
 						visit_value_declaration_and_add_references,
 						&add_ref_data,
 					}
-					#partial switch derived in value_decl.values[index].derived {
-						case ^ast.Proc_Lit: {
-							//fmt.printf("add proc type references %s\n", ident.name);
-							ast.walk(&visitor, &derived.type.node);
-						}
-						case: {
-							//fmt.printf("When tree Value decl type %v at %v\n", reflect.union_variant_typeid(value_decl.values[index].derived), value_decl.values[index].pos);
-							ast.walk(&visitor, &value_decl.values[index].expr_base);
+					if len(value_decl.values) == 0 {
+						fmt.printf("Value decl with name %s has no values\n", name);
+					}
+					else {
+						#partial switch derived in value_decl.values[index].derived {
+							case ^ast.Proc_Lit: {
+								//fmt.printf("add proc type references %s\n", ident.name);
+								ast.walk(&visitor, &derived.type.node);
+							}
+							case: {
+								//fmt.printf("When tree Value decl type %v at %v\n", reflect.union_variant_typeid(value_decl.values[index].derived), value_decl.values[index].pos);
+								ast.walk(&visitor, &value_decl.values[index].expr_base);
+							}
 						}
 					}
 				}
