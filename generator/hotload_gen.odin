@@ -1076,10 +1076,10 @@ visit_when_tree_and_add_references_for_specific_value_declaration :: proc(visito
 						visit_value_declaration_and_add_references,
 						&add_ref_data,
 					}
-					if len(value_decl.values) == 0 {
-						fmt.printf("Value decl with name %s has no values\n", name);
+					if value_decl.type != nil {
+						ast.walk(&visitor, value_decl.type);
 					}
-					else {
+					if len(value_decl.values) > 0 {
 						#partial switch derived in value_decl.values[index].derived {
 							case ^ast.Proc_Lit: {
 								//fmt.printf("add proc type references %s\n", ident.name);
@@ -1207,9 +1207,28 @@ write_when_statement :: proc(data: ^When_Tree_Write_Data, statement: ^ast.Stmt) 
 			}
 
 			if any_name_was_referenced {
-				write_indent(data.sb, data.indent_depth);
+				if derived.is_mutable {
+					log.errorf("Global variables in when trees are not implemented correctly. Need to evaulate the when condition to do it correctly. Because the main program can only pass pointer to variables that are in enabled branches. %v:%d", statement.pos.file, statement.pos.line);
+				}
 				strings.write_string(data.sb, tree.file_src[derived.pos.offset:derived.end.offset]);
 				strings.write_string(data.sb, "\n");
+				/*write_indent(data.sb, data.indent_depth);
+				if derived.type != nil {
+					for name, index in derived.names {
+						if ident, ok := name.derived_expr.(^ast.Ident); ok {
+							if index > 0 {
+								strings.write_string(data.sb, ", ");
+							}
+							strings.write_string(data.sb, ident.name);
+						}
+					}
+					strings.write_string(data.sb, ": ^");
+					strings.write_string(data.sb, tree.file_src[derived.type.pos.offset:derived.type.end.offset]);
+				}
+				else {
+					log.errorf("Value decl %s has no type\n", tree.file_src[derived.pos.offset:derived.end.offset]);
+				}
+				*/
 			}
 		}
 		case: {
@@ -1266,6 +1285,87 @@ write_when_tree :: proc(data: ^When_Tree_Write_Data, statement: ^ast.When_Stmt) 
 		}
 	}
 }
+
+
+/*write_when_statement_global_variable_loaders :: proc(data: ^When_Tree_Write_Data, statement: ^ast.Stmt) {
+	tree := cast(^When_Tree)data.tree;
+	#partial switch derived in statement.derived {
+		case ^ast.When_Stmt: {
+			write_when_tree_global_variable_loaders(data, derived);
+		}
+		case ^ast.Value_Decl: {
+			any_name_was_referenced := false;
+			for name in derived.names {
+				if ident, ok := name.derived_expr.(^ast.Ident); ok {
+					if tree.all_type_declarations[ident.name] == .Referenced {
+						any_name_was_referenced = true;
+						break;
+					}
+				}
+			}
+
+			if any_name_was_referenced {
+				write_indent(data.sb, data.indent_depth);
+				if derived.type != nil {
+					for name, index in derived.names {
+						if ident, ok := name.derived_expr.(^ast.Ident); ok {
+							//if ident.name in visit_data.referenced_identifiers {
+								fmt.sbprintf(data.sb, "\t{0} = auto_cast proc_map[\"{0}\"];\n", ident.name);
+							//}
+						}
+					}
+
+				}
+			}
+		}
+		case: {
+			//assert(false);
+		}
+	}
+}
+write_when_body_global_variable_loaders :: proc(data: ^When_Tree_Write_Data, body: ^ast.Stmt) {
+	data.indent_depth += 1;
+
+	#partial switch derived in body.derived {
+		case ^ast.Block_Stmt: {
+			for stmt in derived.stmts {
+				write_when_statement_global_variable_loaders(data, stmt);
+			}
+		}
+		case: {
+			write_when_statement_global_variable_loaders(data, body);
+		}
+	}
+	data.indent_depth -= 1;
+}
+
+write_when_tree_global_variable_loaders :: proc(data: ^When_Tree_Write_Data, statement: ^ast.When_Stmt) {
+	tree := data.tree;
+
+	write_indent(data.sb, data.indent_depth);
+	strings.write_string(data.sb, "when ")
+	strings.write_string(data.sb, tree.file_src[statement.cond.pos.offset:statement.cond.end.offset]);
+	strings.write_string(data.sb, " {\n");
+
+	write_when_body_global_variable_loaders(data, statement.body);
+
+	write_indent(data.sb, data.indent_depth);
+	strings.write_string(data.sb, "}\n");
+
+	if statement.else_stmt != nil {
+		write_indent(data.sb, data.indent_depth);
+		strings.write_string(data.sb, "else ");
+		if else_when, ok := statement.else_stmt.derived.(^ast.When_Stmt); ok {
+			write_when_tree_global_variable_loaders(data, else_when);
+		}
+		else {
+			strings.write_string(data.sb, "{\n");
+			write_when_body_global_variable_loaders(data, statement.else_stmt);
+			write_indent(data.sb, data.indent_depth);
+			strings.write_string(data.sb, "}\n");
+		}
+	}
+}*/
 
 write_indent :: proc(sb: ^strings.Builder, depth: int) {
 	for ii in 0..<depth do strings.write_byte(sb, '\t');
@@ -1555,7 +1655,7 @@ main :: proc() {
 
 	stopwatch: time.Stopwatch;
 	time.stopwatch_start(&stopwatch);
-    
+
 	do_generate_lib_code := ODIN_DEBUG;
 	do_generate_loader := ODIN_DEBUG;
 	package_path: string;
@@ -2308,18 +2408,6 @@ main :: proc() {
 					strings.write_string(&sb, "\n");
 
 					for attribute, index in proc_signature.attributes {
-						/*fmt.printf("Attribute %d of %s = %v\n\n", index, name, attribute);
-						for elem, eindex in attribute.elems {
-							#partial switch e in elem.derived_expr {
-								case ^ast.Field_Value: {
-									fv := e;
-									fmt.printf("\tField %d = %v | %v.\n\n", eindex, fv.field.derived_expr, fv.value.derived_expr);
-								}
-								case: fmt.printf("\tElem %d = %v.\n\n", eindex, elem.derived);
-							}
-							
-						}*/
-
 						if attribute.end.offset > attribute.pos.offset {
 							strings.write_string(&sb, proc_signature.file_src[attribute.pos.offset:attribute.end.offset]);	
 						}
@@ -2393,6 +2481,11 @@ main :: proc() {
 				fmt.sbprintf(&sb, "\t{0} = auto_cast proc_map[\"{0}\"];\n", name);
 			}
 		}
+
+		/*for when_tree, index in visit_data.when_trees {
+			data := When_Tree_Write_Data { tree = &visit_data.when_trees[index], sb = visit_data.sb, indent_depth = 1};
+			write_when_tree_global_variable_loaders(&data, when_tree.node);
+		}*/
 
 		strings.write_string(&sb, "}\n\n");
 	}

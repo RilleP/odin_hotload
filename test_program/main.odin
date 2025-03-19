@@ -7,28 +7,31 @@ import "../hotloader"
 
 COWABUNGA :: true;
 
-Something :: struct {
-	x: int,
-}
 
 Otherthing :: struct {
 	y: f32,
 }
+Something :: struct {
+	x: int,
+}
 
+x: Something;
 when COWABUNGA {
-	s: Something;
+	A :: true;
+	s_in_when: Something;
 }
 else {
-	s: Something;
+	when A {
+		s_in_when: int;
+	}
 }
 
 
 @hotload run := proc() {
+	x.x = 5;
 	when COWABUNGA {
-		s.x = 3;
-	}
-	else {
-		s.y = 3.0;
+		s_in_when.x = 3;
+		fmt.printf("X = %d\n", s_in_when.x);
 	}
 }
 
