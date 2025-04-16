@@ -403,7 +403,13 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 			strings.write_string(sb, "}");
 		}
 		case ^ast.Bit_Set_Type: {
-			panic("Not implemented");
+			strings.write_string(sb, "bit_set[");
+			write_expression(visit_data, sb, derived.elem, 0);
+			if derived.underlying != nil {
+				strings.write_string(sb, "; ");
+				write_expression(visit_data, sb, derived.underlying, 0);
+			}
+			strings.write_string(sb, "]");
 		}
 		case ^ast.Map_Type: {
 			strings.write_string(sb, "map[");
