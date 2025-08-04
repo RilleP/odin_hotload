@@ -5,34 +5,17 @@ import "core:time"
 import "core:os"
 import "../hotloader"
 
-COWABUNGA :: true;
-
-
-Otherthing :: struct {
-	y: f32,
-}
-Something :: struct {
-	x: int,
+color_srgb :: proc(r, g, b, a: f32) -> [4]f32 {
+	return {r, g, b, a};
 }
 
-x: Something;
-when COWABUNGA {
-	A :: true;
-	s_in_when: Something;
-}
-else {
-	when A {
-		s_in_when: int;
-	}
-}
+blue : [4]f32 = color_srgb(0.1, 0.12, 0.94, 1.0);
 
+red := color_srgb(1.0, 0.1, 0.1, 1.0); // Not used so its ok to not specify type
 
 @hotload run := proc() {
-	x.x = 5;
-	when COWABUNGA {
-		s_in_when.x = 3;
-		fmt.printf("X = %d\n", s_in_when.x);
-	}
+	fmt.printf("Blued is %v\n", blue);
+	fmt.printf("Red is %v\n", red);
 }
 
 main :: proc() {

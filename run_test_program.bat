@@ -6,7 +6,7 @@ if errorlevel 1 goto generator_build_failed
 generator.exe test_program -lib -loader -log-info
 if errorlevel 1 goto generating_failed
 
-rem odin run test_program -ignore-unknown-attributes -debug
+odin run test_program -ignore-unknown-attributes -debug
 if errorlevel 1 goto program_build_failed
 
 

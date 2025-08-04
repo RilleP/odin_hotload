@@ -137,6 +137,7 @@ Global_Variable_Declaration :: struct {
 	value_references_have_been_added: bool,
 	type_expr: ^ast.Expr,
 	value_expr: ^ast.Expr,
+	value_call_proc_name: string,
 
 }
 
@@ -487,6 +488,8 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 		case ^ast.For_Stmt: {
 			enter_block(&visit_data.scopes);
 
+			if derived.label != nil do add_expression_ident_references(visit_data, derived.label);
+			
 			if derived.init != nil {
 				add_statement_references(visit_data, derived.init);
 				/*if value_decl, ok := derived.init.derived_stmt.(^ast.Value_Decl); ok {
@@ -514,9 +517,16 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 			exit_block(&visit_data.scopes);
 		}
 		case ^ast.Range_Stmt: {
+			range := derived;
 			scopes := &visit_data.scopes;
 			enter_block(scopes);
 
+			if range.label != nil {
+				ident, is_ident := range.label.derived_expr.(^ast.Ident);
+				if is_ident {
+					add_declaration_names(scopes, {ident});
+				}
+			}
 			add_declaration_names(scopes, derived.vals);
 			add_expression_ident_references(visit_data, derived.expr);
 
@@ -859,6 +869,9 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			}
 			case ^ast.Basic_Directive: {
 				// TODO?
+			}
+			case ^ast.Implicit: {
+
 			}
 			case: {
 				log.errorf("Unhandled type expression %v at %v\n", reflect.union_variant_typeid(expr.derived), expr.pos);
@@ -2058,13 +2071,20 @@ main :: proc() {
 											type_expr: ^ast.Expr; 
 											if vd.type != nil {
 												type_expr = vd.type;
+												type_string = get_type_string(visit_data.current_file_src, type_expr);
 											}
-											else  {
-												type_expr = derived_value.expr;
+											else if proc_ident, is_ident := derived_value.expr.derived_expr.(^ast.Ident); is_ident {
+												visit_data.global_variables[name] = {
+													file_src = visit_data.current_file_src,
+													type_expr = vd.type,
+													value_expr = value,
+													value_call_proc_name = proc_ident.name,
+												}
+												//type_expr = derived_value.expr;
+												//log.errorf("Global variable ")
+												//fmt.printf("Mutable Call expr type string = %s\n", type_string);
 											}
 
-											type_string = get_type_string(visit_data.current_file_src, type_expr);
-											fmt.printf("Mutable Call expr type string = %s\n", type_string);
 										}
 										case ^ast.Selector_Expr: {
 											type_string = visit_data.current_file_src[derived_value.expr.pos.offset:derived_value.expr.end.offset];
@@ -2450,7 +2470,24 @@ main :: proc() {
 		strings.write_string(&sb, "// Referenced Global variables\n");
 		for name, global_variable in visit_data.global_variables {
 			if name in visit_data.referenced_identifiers {
-				fmt.sbprintf(&sb, "{0}: ^{1};\n", name, global_variable.type_string);
+
+				if global_variable.type_string != "" {
+					fmt.sbprintf(&sb, "{0}: ^{1};\n", name, global_variable.type_string);
+				}
+				else if global_variable.value_call_proc_name != "" {
+					ps, ps_found := visit_data.other_proc_signatures[global_variable.value_call_proc_name];
+					if ps_found {
+						results := ps.type.results;
+						if len(results.list) != 1 {
+							log.errorf("Global variable is initialized by a procedure call that does not return exactly one value. That is not allowed.");
+						}
+						else {
+							type := results.list[0].type;
+							type_string := ps.file_src[type.expr_base.pos.offset:type.expr_base.end.offset];
+							fmt.sbprintf(&sb, "{0}: ^{1};\n", name, type_string);
+						}
+					}
+				}
 			}
 		}
 		strings.write_byte(&sb, '\n');
