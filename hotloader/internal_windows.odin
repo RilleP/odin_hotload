@@ -8,17 +8,15 @@ import "core:slice"
 import "core:fmt"
 import "core:sync"
 
-string_to_wcstr :: proc(s: string) -> []windows.WCHAR {
-	result := make([]windows.WCHAR, len(s)+1);
-	for c, index in s {
-		result[index] = cast(windows.WCHAR)c;
-	}
-	result[len(s)] = 0;
-	return result;
+string_to_wcstr :: proc(s: string, allocator := context.allocator) -> cstring16 {
+	result := make([]u16, len(s)+1);
+	length := utf16.encode_string(result, s);
+	result[length] = 0;
+	return cast(cstring16)&result[0];
 }
 
 run_process :: proc(command: string) -> int {
-	compile_cmd := raw_data(string_to_wcstr(command));
+	compile_cmd := string_to_wcstr(command);
 	si: windows.STARTUPINFOW;
 	si.cb = size_of(si);
 	pi: windows.PROCESS_INFORMATION;
@@ -57,7 +55,7 @@ run_process :: proc(command: string) -> int {
 reload_lib_thread_proc :: proc() {
 	dir_path := target_package_path;
 	dir_handle := windows.CreateFileW(
-		raw_data(string_to_wcstr(dir_path)),
+		string_to_wcstr(dir_path),
 		windows.GENERIC_READ,
         windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
         nil,
