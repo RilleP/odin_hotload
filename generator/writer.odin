@@ -220,10 +220,7 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 			strings.write_string(sb, derived.token.text);
 		}
 		case ^ast.Type_Assertion: {
-			write_expression(visit_data, sb, derived.expr, 0);
-			strings.write_string(sb, ".(");
-			write_expression(visit_data, sb, derived.type, 0);
-			strings.write_string(sb, ")");
+			strings.write_string(sb, visit_data.current_file_src[expression.pos.offset:expression.end.offset]);			
 		}
 		case ^ast.Auto_Cast: {
 			strings.write_string(sb, derived.op.text);
@@ -817,10 +814,17 @@ write_proc_literal :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, proc_l
 		case .No_Inline: strings.write_string(sb, "#force_no_inline ");
 	}
 
+
+	enter_block(scopes);
+	add_field_list_type_references(visit_data, scopes, proc_lit.type.params);
+	if proc_lit.type.results != nil {
+		add_field_list_type_references(visit_data, scopes, proc_lit.type.results);
+	}
+	
 	write_proc_header(visit_data, sb, proc_lit.type, indent);
 	
-	enter_block(scopes);
 	block := proc_lit.body.derived_stmt.(^ast.Block_Stmt);
 	write_block(visit_data, sb, block, indent);
+
 	exit_block(scopes);
 }

@@ -1,0 +1,9 @@
+// raddbg 0.9.21 project file
+
+recent_file: path: "generator/writer.odin"
+target:
+{
+  executable: "generator.exe"
+  working_directory: ""
+  enabled: 1
+}
