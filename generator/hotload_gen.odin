@@ -460,6 +460,16 @@ exit_block :: proc(scopes: ^Scopes) {
 	}
 }
 
+
+maybe_add_ident_reference :: proc(visit_data: ^Visit_Data, expr: ^ast.Expr) {
+	if expr != nil {
+		ident, is_ident := expr.derived_expr.(^ast.Ident);
+		if is_ident {
+			add_declaration_names(&visit_data.scopes, {ident});
+		}
+	}
+}
+
 add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) {
 	#partial switch derived in statement.derived_stmt {
 		case ^ast.Value_Decl: {
@@ -488,17 +498,11 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 		case ^ast.For_Stmt: {
 			enter_block(&visit_data.scopes);
 
-			if derived.label != nil do add_expression_ident_references(visit_data, derived.label);
+			
+			maybe_add_ident_reference(visit_data, derived.label);
 			
 			if derived.init != nil {
 				add_statement_references(visit_data, derived.init);
-				/*if value_decl, ok := derived.init.derived_stmt.(^ast.Value_Decl); ok {
-					for value in value_decl.values {
-						add_expression_ident_references(visit_data, value);
-					}
-					if value_decl.type != nil do add_expression_type_reference(visit_data, value_decl.type);
-					add_declaration_names(visit_data, value_decl.names);
-				}*/
 			}
 			if derived.cond != nil {
 				add_expression_ident_references(visit_data, derived.cond);	
@@ -521,12 +525,7 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 			scopes := &visit_data.scopes;
 			enter_block(scopes);
 
-			if range.label != nil {
-				ident, is_ident := range.label.derived_expr.(^ast.Ident);
-				if is_ident {
-					add_declaration_names(scopes, {ident});
-				}
-			}
+			maybe_add_ident_reference(visit_data, range.label);
 			add_declaration_names(scopes, derived.vals);
 			add_expression_ident_references(visit_data, derived.expr);
 
@@ -571,6 +570,9 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 		case ^ast.If_Stmt: {
 			// Add a surrounding block around the if block with the init statement.
 			enter_block(&visit_data.scopes);
+
+			maybe_add_ident_reference(visit_data, derived.label);
+
 			if derived.init != nil {
 				add_statement_references(visit_data, derived.init);
 			}
