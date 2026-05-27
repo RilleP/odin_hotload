@@ -1400,11 +1400,8 @@ Magic_Suffixes :: enum {
 	windows,
 	freebsd,
 	openbsd,
-	essence,
-
 	darwin_amd64,
     darwin_arm64,
-    essence_amd64,
     linux_i386,
     linux_amd64,
     linux_arm64,
@@ -1433,7 +1430,6 @@ OS_NAMES := [type_of(ODIN_OS)]string {
 	.Windows = "windows",
 	.Darwin = "darwin",
 	.Linux = "linux",
-	.Essence = "essence",
 	.FreeBSD = "freebsd",
 	.OpenBSD = "openbsd",
 	.WASI = "wasi",
@@ -2841,10 +2837,6 @@ setup_allowed_magic_suffixes :: proc() {
 	    if target_arch == .arm32 {
 	    	allowed_magic_suffixes[.linux_arm32] = true;
 	    }
-	}
-	else if target_os == .Essence {
-		allowed_magic_suffixes[.essence] = true;
-		allowed_magic_suffixes[.essence_amd64] = true;
 	}
 	else if target_os == .FreeBSD {
 		allowed_magic_suffixes[.freebsd] = true;
