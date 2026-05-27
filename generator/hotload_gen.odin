@@ -1047,6 +1047,9 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			}
 			return nil;
 		}
+		case ^ast.Paren_Expr: {
+			handle_type_expression(node.expr, data)	
+		}
 		case ^ast.Basic_Directive: {
 			//panic("Handled in case ^ast.Call_Expr");
 		}
@@ -1459,8 +1462,8 @@ allowed_magic_suffixes: [Magic_Suffixes]bool;
 my_collect_package :: proc(path: string) -> (pkg: ^ast.Package, success: bool) {
 	NO_POS :: tokenizer.Pos{}
 
-	pkg_path, pkg_path_ok := filepath.abs(path)
-	if !pkg_path_ok {
+	pkg_path, pkg_path_err := filepath.abs(path, context.allocator)
+	if pkg_path_err != nil {
 		return
 	}
 
@@ -1503,12 +1506,13 @@ my_collect_package :: proc(path: string) -> (pkg: ^ast.Package, success: bool) {
 		}
 		log.infof("Add file '%s'", match);*/
 		src: []byte
-		fullpath, ok := filepath.abs(match)
-		if !ok {
+		fullpath, fullpath_err := filepath.abs(match, context.allocator)
+		if fullpath_err != nil {
 			return
 		}
-		src, ok = os.read_entire_file(fullpath)
-		if !ok {
+		src_err: os.Error;
+		src, src_err = os.read_entire_file(fullpath, context.allocator)
+		if src_err != nil {
 			delete(fullpath)
 			return
 		}
@@ -2143,7 +2147,8 @@ main :: proc() {
 										 ^ast.Proc_Group,
 										 ^ast.Dynamic_Array_Type,
 										 ^ast.Bit_Field_Type,
-										 ^ast.Bit_Set_Type: 
+										 ^ast.Bit_Set_Type,
+										 ^ast.Paren_Expr: 
 									{
 										visit_data.all_type_declarations[name] = Type_Declaration{
 											decl_string = visit_data.current_file_src[value.pos.offset:value.end.offset],
@@ -2564,7 +2569,12 @@ main :: proc() {
 		}
 	}
 
-	relative_target_package_path, rel_error := filepath.rel(os.get_current_directory(), package_path);
+	working_dir, working_dir_err := os.get_working_directory(context.allocator);
+	if working_dir_err != nil {
+		log.errorf("Failed to get working dir: %v", working_dir_err);
+		os.exit(1);
+	}
+	relative_target_package_path, rel_error := filepath.rel(working_dir, package_path);
 	if rel_error != .None {
 		relative_target_package_path = package_path;
 	}
@@ -2591,8 +2601,12 @@ main :: proc() {
 	if do_generate_lib_code {
 		output := strings.to_string(sb);
 		//fmt.printf("Output:\n%s\n", output);
-		os.write_entire_file(output_path, transmute([]u8)output);
-		fmt.printf("Output %s\n", output_path);
+		write_err := os.write_entire_file(output_path, transmute([]u8)output);
+		if write_err != nil {
+			log.errorf("Failed to write output to %s: %v", output_path, write_err);
+			os.exit(1);
+		}
+		log.info("Output %s", output_path);
 	}
 
 	if do_generate_loader {
@@ -2689,8 +2703,12 @@ hotload_command_line_defines := []Hotload_Command_Line_Define {
 		strings.write_string(&loader_sb, "}\n");
 
 		hotload_procs_path := fmt.tprintf("%s/hotload_procs_%s_%s.odin", package_path, OS_NAMES[target_os], ARCH_NAMES[target_arch]);
-		os.write_entire_file(hotload_procs_path, transmute([]u8)strings.to_string(loader_sb));
-		fmt.printf("Output %s\n", hotload_procs_path);
+		write_err := os.write_entire_file(hotload_procs_path, transmute([]u8)strings.to_string(loader_sb));
+		if write_err != nil {
+			log.errorf("Failed to write output to %s: %v", hotload_procs_path, write_err);
+			os.exit(1);
+		}
+		log.infof("Output %s\n", hotload_procs_path);
 	}
 	
 	fmt.printf("Finished in %v\n", time.stopwatch_duration(stopwatch));
@@ -2725,7 +2743,7 @@ get_package_name_at_path :: proc(target_relative_path: string, package_path: str
 		return;
 	}
 	defer os.close(dir_handle);
-	files, read_dir_error := os.read_dir(dir_handle, -1);
+	files, read_dir_error := os.read_dir(dir_handle, -1, context.allocator);
 	if read_dir_error != os.ERROR_NONE {
 		log.errorf("Failed to get files at imported package %s (%s)\n", package_path, dir_path);
 		return;
@@ -2741,7 +2759,7 @@ get_package_name_at_path :: proc(target_relative_path: string, package_path: str
 	slice.sort_by_cmp(files, cmp_file_info_size);
 
 	file_loop: for fi in files {
-		if fi.is_dir {
+		if fi.type == .Directory {
 			continue;
 		}
 
@@ -2753,9 +2771,9 @@ get_package_name_at_path :: proc(target_relative_path: string, package_path: str
 		
 		mem.free_all(file_allocator);
 
-		data, file_read_success := os.read_entire_file(fi.fullpath, file_allocator);
-		if !file_read_success {
-			log.errorf("Failed to open imported package file %s\n", fi.fullpath);
+		data, file_read_err := os.read_entire_file(fi.fullpath, file_allocator);
+		if file_read_err != nil {
+			log.errorf("Failed to open imported package file %s: %v", fi.fullpath, file_read_err);
 			continue file_loop;
 		}
 		text := transmute(string)data;

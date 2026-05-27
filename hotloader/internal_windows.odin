@@ -7,6 +7,7 @@ import "core:unicode/utf16"
 import "core:slice"
 import "core:fmt"
 import "core:sync"
+import "core:time"
 
 string_to_wcstr :: proc(s: string, allocator := context.allocator) -> cstring16 {
 	result := make([]u16, len(s)+1);
@@ -100,7 +101,7 @@ reload_lib_thread_proc :: proc() {
 			    	}
 			    	else {
 				    	//fmt.printf("File: %s, changed %v\n", file_name, new_last_write_time);
-				    	if new_last_write_time > hotload_file.last_change_time {
+				    	if time.diff(hotload_file.last_change_time, new_last_write_time) > 0 {
 				    		hotload_file.last_change_time = new_last_write_time;
 				    		hotload_file.has_changed = true;
 				    		//fmt.printf("File: %s, changed %v\n", file_name, new_last_write_time);

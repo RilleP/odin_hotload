@@ -5,7 +5,7 @@ import "core:time"
 import "core:os"
 import "../hotloader"
 
-color_srgb :: proc(r, g, b, a: f32) -> [4]f32 {
+color_srgb :: proc "contextless" (r, g, b, a: f32) -> [4]f32 {
 	return {r, g, b, a};
 }
 
@@ -16,7 +16,12 @@ red := color_srgb(1.0, 0.1, 0.1, 1.0); // Not used so its ok to not specify type
 @hotload run := proc() {
 	fmt.printf("Blued is %v\n", blue);
 	fmt.printf("Red is %v\n", red);
+	fmt.printf("B is %v\n", B);
 }
+
+
+A :: 3;
+B :: -(A+4);
 
 main :: proc() {
 	DO_HOTLOADING :: true;

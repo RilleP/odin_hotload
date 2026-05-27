@@ -96,7 +96,7 @@ flags: bit_set[Flag];
 Hotload_File :: struct {
 	file_name: string,
 	has_changed: bool,
-	last_change_time: os.File_Time,
+	last_change_time: time.Time,
 }
 
 lib_generator_exe_path: string;
@@ -105,7 +105,8 @@ start :: proc(loader_proc: Loader_Proc, file_names: []string, generator_exe_path
 	assert(!is_running);
 	is_running = true;
 	dir, file := filepath.split(location.file_path);
-	working_dir := os.get_current_directory(context.temp_allocator);
+	working_dir, working_dir_err := os.get_working_directory(context.temp_allocator);
+	assert(working_dir_err == nil);
 	target_path, relative_error := filepath.rel(working_dir, dir);
 	if relative_error != .None {
 		target_package_path = strings.clone(dir); 
@@ -122,7 +123,7 @@ start :: proc(loader_proc: Loader_Proc, file_names: []string, generator_exe_path
 		hotload_files[index] = {
 			file_name,
 			false,
-			0,
+			time.Time{0},
 		};
 	}
 	the_loader_proc = loader_proc;
