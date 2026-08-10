@@ -288,6 +288,15 @@ write_expression :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, expressi
 			strings.write_string(sb, "[dynamic]");
 			write_expression(visit_data, sb, derived.elem, indent);
 		}
+		case ^ast.Fixed_Capacity_Dynamic_Array_Type: {
+			if derived.tag != nil {
+				write_expression(visit_data, sb, derived.tag, indent);
+			}
+			strings.write_string(sb, "[dynamic;");
+			write_expression(visit_data, sb, derived.capacity, indent);
+			strings.write_string(sb, "]")
+			write_expression(visit_data, sb, derived.elem, indent);
+		}
 		case ^ast.Struct_Type: {
 			strings.write_string(sb, "struct ");
 			if derived.poly_params != nil {

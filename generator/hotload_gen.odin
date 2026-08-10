@@ -207,6 +207,10 @@ add_expression_type_reference :: proc(visit_data: ^Visit_Data, expr: ^ast.Expr) 
 		case ^ast.Dynamic_Array_Type: {
 			add_expression_type_reference(visit_data, derived.elem);
 		}
+		case ^ast.Fixed_Capacity_Dynamic_Array_Type: {
+			add_expression_type_reference(visit_data, derived.elem);
+			add_expression_type_reference(visit_data, derived.capacity);
+		}
 		case ^ast.Ellipsis: {
 			add_expression_type_reference(visit_data, derived.expr);
 		}
@@ -806,6 +810,10 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			case ^ast.Dynamic_Array_Type: {
 				handle_type_expression(derived.elem, data);
 			}
+			case ^ast.Fixed_Capacity_Dynamic_Array_Type: {
+				handle_type_expression(derived.elem, data);
+				handle_type_expression(derived.capacity, data);
+			}
 			case ^ast.Matrix_Type: {
 				handle_type_expression(derived.row_count, data);
 				handle_type_expression(derived.column_count, data);
@@ -911,6 +919,10 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 		}
 		case ^ast.Dynamic_Array_Type: {
 			handle_type_expression(node.elem, data);
+		}
+		case ^ast.Fixed_Capacity_Dynamic_Array_Type: {
+			handle_type_expression(node.elem, data);
+			handle_type_expression(node.capacity, data);
 		}
 		case ^ast.Pointer_Type: {
 			handle_type_expression(node.elem, data);
@@ -1411,7 +1423,6 @@ Magic_Suffixes :: enum {
     freebsd_i386,
     freebsd_amd64,
     openbsd_amd64,
-    haiku_amd64,
     freestanding_wasm32,
     wasi_wasm32,
     js_wasm32,
@@ -1435,7 +1446,6 @@ OS_NAMES := [type_of(ODIN_OS)]string {
 	.WASI = "wasi",
 	.JS = "js",
 	.Freestanding = "freestanding",
-	.Haiku = "haiku",
 	.NetBSD = "netbsd",
 	.Orca = "orca",
 };
