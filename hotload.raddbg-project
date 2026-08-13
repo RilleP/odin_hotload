@@ -1,9 +1,10 @@
-// raddbg 0.9.21 project file
+// raddbg 0.9.28 project file
 
 recent_file: path: "generator/writer.odin"
 target:
 {
   executable: "generator.exe"
-  working_directory: ""
+  working_directory: "../hotload"
   enabled: 1
+  arguments: "test_program -lib"
 }

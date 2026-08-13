@@ -839,7 +839,9 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 				handle_type_expression(derived.right, data);
 			}
 			case ^ast.Unary_Expr: {
-				handle_type_expression(derived.expr, data);
+				if derived.expr != nil {
+					handle_type_expression(derived.expr, data);
+				}
 			}			
 			case ^ast.Selector_Expr: {
 				// Dont add since these are handled by import
@@ -936,7 +938,9 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			handle_type_expression(node.right, data);
 		}
 		case ^ast.Unary_Expr: {
-			handle_type_expression(node.expr, data);
+			if node.expr != nil {
+				handle_type_expression(node.expr, data);
+			}
 		}
 		case ^ast.Bit_Set_Type: {
 			handle_type_expression(node.elem, data);
@@ -2075,9 +2079,19 @@ main :: proc() {
 											}
 											else  {
 												type_expr = derived_value.type;
+												if array_type, is_array_type := type_expr.derived_expr.(^ast.Array_Type); is_array_type && array_type.len != nil {
+													if unary, is_unary := array_type.len.derived_expr.(^ast.Unary_Expr); is_unary && unary.op.kind == .Question {
+														//fmt.printf("[?] length == %d!\n", len(derived_value.elems));
+														offset0 := array_type.close.offset+1;
+														offset1 := type_expr.end.offset;
+														type_string = fmt.tprintf("[%d]%s", len(derived_value.elems), visit_data.current_file_src[offset0:offset1]);
+	
+													}
+												}
 											}
-
-											type_string = get_type_string(visit_data.current_file_src, type_expr);
+											if type_string == "" {
+												type_string = get_type_string(visit_data.current_file_src, type_expr);
+											}
 										}
 										case ^ast.Call_Expr: {
 											type_expr: ^ast.Expr; 
@@ -2295,7 +2309,7 @@ main :: proc() {
 					visit_data.current_file_src = global_var_decl.file_src;
 					if global_var_decl.value_expr != nil {
 						#partial switch expr in global_var_decl.value_expr.derived_expr {
-							case ^ast.Comp_Lit: {
+							case ^ast.Comp_Lit: {								
 								if expr.type != nil {
 									ast.walk(&value_decl_add_references_visitor, expr.type);
 								}
