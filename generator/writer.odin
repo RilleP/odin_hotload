@@ -588,6 +588,11 @@ write_statement :: proc(visit_data: ^Visit_Data, sb: ^strings.Builder, statement
 			}
 			maybe_write_label(visit_data, sb, derived.label, indent);
 			strings.write_string(sb, "for ");
+			if derived.init != nil {
+				write_statement(visit_data, sb, derived.init, 0);
+				strings.write_string(sb, "; ");
+			}
+			
 			write_expression_array(visit_data, sb, derived.vals, indent);
 
 			strings.write_string(sb, " in ");

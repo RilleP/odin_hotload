@@ -530,6 +530,9 @@ add_statement_references :: proc(visit_data: ^Visit_Data, statement: ^ast.Stmt) 
 			enter_block(scopes);
 
 			maybe_add_ident_reference(visit_data, range.label);
+			if derived.init != nil {
+				add_statement_references(visit_data, derived.init);
+			}
 			add_declaration_names(scopes, derived.vals);
 			add_expression_ident_references(visit_data, derived.expr);
 
@@ -798,6 +801,9 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 
 				}*/
 			}
+			case ^ast.Enum_Type: {
+				// Don't think anything has to be done here
+			}
 			case ^ast.Pointer_Type: {
 				handle_type_expression(derived.elem, data);
 			}
@@ -881,7 +887,7 @@ visit_value_declaration_and_add_references :: proc(visitor: ^ast.Visitor, any_no
 			}
 			case ^ast.Basic_Directive: {
 				// TODO?
-			}
+			}			
 			case ^ast.Implicit: {
 
 			}
