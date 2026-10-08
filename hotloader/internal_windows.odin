@@ -90,7 +90,7 @@ reload_lib_thread_proc :: proc() {
 	    for byte_offset :u32= 0; byte_offset < bytes_returned; {
 	    	fni := cast(^windows.FILE_NOTIFY_INFORMATION)&buffer[byte_offset];
 	    	utf8_buffer: [512]u8;
-	    	utf8_length := utf16.decode_to_utf8(utf8_buffer[:], slice.from_ptr(&fni.file_name[0], cast(int)fni.file_name_length/2));
+	    	utf8_length := utf16.decode_to_utf8(utf8_buffer[:], slice.from_ptr(&fni.FileName[0], cast(int)fni.FileNameLength/2));
 	    	file_name := transmute(string)utf8_buffer[:utf8_length];
 
 	    	for &hotload_file in hotload_files {
@@ -113,8 +113,8 @@ reload_lib_thread_proc :: proc() {
 	    	}
 
 	    	
-	    	byte_offset += fni.next_entry_offset;
-	    	if fni.next_entry_offset == 0 {
+	    	byte_offset += fni.NextEntryOffset;
+	    	if fni.NextEntryOffset == 0 {
 	    		break;
 	    	}
 	    }
